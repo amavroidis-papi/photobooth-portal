@@ -7,7 +7,10 @@ import io
 
 # --- CONFIGURATION ---
 # We fetch the secret token from the cloud server's environment variables for security
-DROPBOX_TOKEN = st.secrets["DROPBOX_TOKEN"]
+# NEW
+import os # Make sure this is at the very top with other imports
+# ...
+DROPBOX_TOKEN = os.environ.get("DROPBOX_TOKEN")
 GLOBAL_ASSETS = "/_Global_Assets"
 HEALTH_FOLDER = f"{GLOBAL_ASSETS}/_Server_Health"
 
