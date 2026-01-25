@@ -33,7 +33,6 @@ except Exception as e:
 
 # --- HELPER FUNCTIONS ---
 def get_fleet_data():
-    """Reads health files from Dropbox."""
     servers = []
     try:
         res = dbx.files_list_folder(HEALTH_FOLDER)
@@ -48,7 +47,6 @@ def get_fleet_data():
     return servers
 
 def get_available_actions():
-    """Lists .atn files in the Actions folder."""
     actions = []
     try:
         res = dbx.files_list_folder(ACTIONS_FOLDER)
@@ -59,7 +57,6 @@ def get_available_actions():
     return sorted(actions)
 
 def load_config(station_id):
-    """Downloads config.json for a specific station."""
     path = f"/{station_id}/config.json"
     try:
         _, res = dbx.files_download(path)
@@ -67,94 +64,72 @@ def load_config(station_id):
     except: return None, path
 
 def save_config(config_data, path):
-    """Uploads updated config.json back to Dropbox."""
     data_str = json.dumps(config_data, indent=2)
     dbx.files_upload(data_str.encode('utf-8'), path, mode=dropbox.files.WriteMode.overwrite)
     return True
 
 def upload_asset(uploaded_file, target_path):
-    """Uploads JPG/PNG/ATN files to Dropbox."""
     dbx.files_upload(uploaded_file.getvalue(), target_path, mode=dropbox.files.WriteMode.overwrite)
 
 # --- UI LAYOUT ---
 st.set_page_config(page_title="Photobooth Command", layout="wide", page_icon="📷")
 st.title("📷 Photobooth Fleet Command")
 
-# 1. TOP METRICS (Fleet Health)
 fleet_data = get_fleet_data()
+
+# --- 1. DASHBOARD METRICS ---
 if fleet_data:
     m1, m2, m3 = st.columns(3)
     total_online = len(fleet_data)
-    # Safely calculate disk space from any server reporting it
-    disk_list = [float(s.get('disk_free_gb', 0)) for s in fleet_data if 'disk_free_gb' in s]
-    avg_disk = sum(disk_list) / len(disk_list) if disk_list else 0
-    
+    avg_disk = sum([float(s.get('disk_free_gb', 0)) for s in fleet_data]) / total_online
     m1.metric("Servers Online", total_online)
     m2.metric("Avg Free Disk", f"{avg_disk:.1f} GB")
-    m3.metric("System Version", fleet_data[0].get('version', 'v30+'))
+    m3.metric("Manager Version", fleet_data[0].get('version', 'v33'))
 
 st.divider()
 
-# 2. SIDEBAR - LIVE STATUS & FILTER
-st.sidebar.header("📡 Live Status")
+# --- 2. SIDEBAR (DETAILED FLEET HEALTH) ---
+st.sidebar.header("📡 Live Fleet Health")
 online_server_ids = []
 if fleet_data:
     for server in fleet_data:
         with st.sidebar.expander(f"🖥️ Server: {server['server_id']}", expanded=True):
-            # Show disk health if available
-            if 'disk_free_gb' in server:
-                val = float(server['disk_free_gb'])
-                color = "green" if val > 15 else "orange" if val > 5 else "red"
-                st.write(f"Disk: :{color}[{val} GB Free]")
-            
-            # Show active stations
-            active = server.get('active_stations', [server.get('watching_station', 'Unknown')])
-            st.write(f"Monitoring: `{', '.join(active)}`")
-            st.caption(f"Last Ping: {server['last_seen']}")
-            
+            disk_val = float(server.get('disk_free_gb', 0))
+            disk_color = "green" if disk_val > 20 else "orange" if disk_val > 10 else "red"
+            st.write(f"**Disk Space:** :{disk_color}[{disk_val} GB Free]")
+            st.progress(min(disk_val/100, 1.0))
+            active = server.get('active_stations', [])
+            st.write(f"**Monitoring:** `{', '.join(active)}`")
+            st.caption(f"Last Seen: {server['last_seen']}")
     online_server_ids = sorted(list(set([s['server_id'] for s in fleet_data])))
-    filter_server = st.sidebar.selectbox("Filter Station List by Server", ["All Stations"] + online_server_ids)
 else:
     st.sidebar.warning("No servers online.")
-    filter_server = "All Stations"
 
-# 3. STATION SELECTOR
+# --- 3. STATION MANAGER ---
 st.sidebar.divider()
 st.sidebar.header("🎮 Station Manager")
-if filter_server != "All Stations":
-    # Show only stations monitored by this specific server
-    s_data = next(s for s in fleet_data if s['server_id'] == filter_server)
-    display_list = sorted(s_data.get('active_stations', [s_data.get('watching_station')]))
-else:
-    display_list = KNOWN_STATIONS
+selected_station = st.sidebar.selectbox("Select Station to Configure", KNOWN_STATIONS)
 
-selected_station = st.sidebar.selectbox("Select Station to Configure", display_list)
-
-# 4. CONFIGURATION PANEL
 if selected_station:
-    st.header(f"🔧 Configuration: {selected_station}")
+    st.header(f"🔧 Managing: {selected_station}")
     config, config_path = load_config(selected_station)
     
     if not config:
-        st.warning(f"Config missing for {selected_station}. Run supervisor to auto-generate.")
+        st.warning(f"Config file missing for {selected_station}.")
     else:
-        # --- MASTER SWITCH & ASSIGNMENT ---
+        # MASTER ASSIGNMENT
         col_sw, col_assign, col_status = st.columns([2, 3, 2])
-        
         with col_sw:
             is_enabled = config.get("station_enabled", True)
-            new_enabled = st.toggle("Processing Status", value=is_enabled, key="master_sw")
-        
+            new_enabled = st.toggle("Station Processing ON/OFF", value=is_enabled)
         with col_assign:
             curr_assign = config.get("assigned_server", "Unassigned")
             assign_options = ["Unassigned"] + sorted(list(set(online_server_ids + [curr_assign])))
-            new_assign = st.selectbox("Assign to Mac Mini", assign_options, index=assign_options.index(curr_assign) if curr_assign in assign_options else 0)
-
+            new_assign = st.selectbox("Assign to Manager", assign_options, index=assign_options.index(curr_assign) if curr_assign in assign_options else 0)
         with col_status:
-            if new_enabled: st.success("🟢 Station Enabled")
-            else: st.error("🔴 Station Disabled")
-        
-        # Save Assignment Changes immediately
+            if new_enabled: st.success("🟢 Active")
+            else: st.error("🔴 Disabled")
+
         if new_enabled != is_enabled or new_assign != curr_assign:
             config["station_enabled"] = new_enabled
             config["assigned_server"] = new_assign
@@ -163,89 +138,83 @@ if selected_station:
 
         st.divider()
 
-        # --- TABS FOR SETTINGS ---
-        tab1, tab2, tab3 = st.tabs(["⚙️ Settings", "🎨 Assets", "🎬 Profiles & Actions"])
-
+        # SETTINGS TABS
+        tab1, tab2, tab3 = st.tabs(["⚙️ Settings", "🎨 Assets (Templates)", "🎬 Profiles & Actions"])
+        
         with tab1:
             c1, c2 = st.columns(2)
             with c1:
-                # Background Removal
                 curr_bg = config['settings'].get('remove_background', False)
                 new_bg = st.toggle("Remove Background (API)", value=curr_bg)
                 
                 curr_key = config['settings'].get('remove_bg_api_key', '')
                 new_key = st.text_input("API Key", value=curr_key, type="password")
 
-                # Temperature
                 curr_temp = config['settings'].get('temperature', 0)
                 new_temp = st.slider("Color Temperature", -100, 100, curr_temp)
 
             with c2:
-                # Orientation
                 modes = ["auto", "force_portrait", "force_landscape"]
                 curr_mode = config['settings'].get('orientation_mode', 'auto')
                 new_mode = st.selectbox("Orientation Mode", modes, index=modes.index(curr_mode))
 
-            if st.button("Save Global Settings", type="primary"):
+            if st.button("Save Global Settings"):
                 config['settings'].update({
                     "remove_background": new_bg,
                     "remove_bg_api_key": new_key,
                     "temperature": new_temp,
                     "orientation_mode": new_mode
                 })
-                if save_config(config, config_path):
-                    st.success("Config Updated!")
-                    time.sleep(1)
-                    st.rerun()
+                save_config(config, config_path)
+                st.success("Settings Saved!")
 
         with tab2:
             st.subheader("Upload Templates")
-            st.caption(f"Saving to: /{selected_station}/templates/")
+            st.caption(f"Path: /{selected_station}/templates/")
             ca, cb = st.columns(2)
             with ca:
-                bg_up = st.file_uploader("Upload Background (.jpg)", type=['jpg', 'jpeg'])
-                if bg_up and st.button("Save Background"):
-                    upload_asset(bg_up, f"/{selected_station}/templates/background.jpg")
-                    st.success("Background Saved!")
+                bg = st.file_uploader("Upload Background (.jpg)", type=['jpg', 'jpeg'])
+                if bg and st.button("Save BG"):
+                    upload_asset(bg, f"/{selected_station}/templates/background.jpg")
+                    st.success("Uploaded!")
             with cb:
-                ol_up = st.file_uploader("Upload Overlay (.png)", type=['png'])
-                if ol_up and st.button("Save Overlay"):
-                    upload_asset(ol_up, f"/{selected_station}/templates/overlay.png")
-                    st.success("Overlay Saved!")
+                ol = st.file_uploader("Upload Overlay (.png)", type=['png'])
+                if ol and st.button("Save Overlay"):
+                    upload_asset(ol, f"/{selected_station}/templates/overlay.png")
+                    st.success("Uploaded!")
 
         with tab3:
             available_sets = get_available_actions()
             if not available_sets: available_sets = ["Default"]
 
-            st.markdown("### Action Profiles (Droplets)")
-            cp, cl = st.columns(2)
-            with cp:
-                st.caption("Portrait Mode")
-                curr_ps = config['active_profile']['portrait'].get('action_set', '')
-                curr_pn = config['active_profile']['portrait'].get('action_name', '')
-                new_ps = st.selectbox("Action Set (P)", available_sets, index=available_sets.index(curr_ps) if curr_ps in available_sets else 0)
-                new_pn = st.text_input("Action Name (P)", value=curr_pn)
+            st.markdown("### 🎬 Action Profiles")
+            col_p, col_l = st.columns(2)
+            with col_p:
+                st.caption("Portrait")
+                cur_p_set = config['active_profile']['portrait'].get('action_set', '')
+                cur_p_name = config['active_profile']['portrait'].get('action_name', '')
+                new_p_set = st.selectbox("Action File (Portrait)", available_sets, index=available_sets.index(cur_p_set) if cur_p_set in available_sets else 0)
+                new_p_name = st.text_input("Action Name (Portrait)", cur_p_name)
 
-            with cl:
-                st.caption("Landscape Mode")
-                curr_ls = config['active_profile']['landscape'].get('action_set', '')
-                curr_ln = config['active_profile']['landscape'].get('action_name', '')
-                new_ls = st.selectbox("Action Set (L)", available_sets, index=available_sets.index(curr_ls) if curr_ls in available_sets else 0)
-                new_ln = st.text_input("Action Name (L)", value=curr_ln)
+            with col_l:
+                st.caption("Landscape")
+                cur_l_set = config['active_profile']['landscape'].get('action_set', '')
+                cur_l_name = config['active_profile']['landscape'].get('action_name', '')
+                new_l_set = st.selectbox("Action File (Landscape)", available_sets, index=available_sets.index(cur_l_set) if cur_l_set in available_sets else 0)
+                new_l_name = st.text_input("Action Name (Landscape)", cur_l_name)
 
-            if st.button("Update Action Profiles"):
-                config['active_profile']['portrait'] = {"action_set": new_ps, "action_name": new_pn}
-                config['active_profile']['landscape'] = {"action_set": new_ls, "action_name": new_ln}
+            if st.button("Update Profiles"):
+                config['active_profile']['portrait'].update({"action_set": new_p_set, "action_name": new_p_name})
+                config['active_profile']['landscape'].update({"action_set": new_l_set, "action_name": new_l_name})
                 save_config(config, config_path)
-                st.success("Actions Assigned!")
+                st.success("Actions Updated!")
 
             st.divider()
-            
-            # Subfolder Action logic 
-            st.subheader("Subfolder Event Management")
-            curr_sub = config.get('subfolder_action_set', 'Event_Subfolders')
-            new_sub = st.selectbox("Default Subfolder Action Set", available_sets, index=available_sets.index(curr_sub) if curr_sub in available_sets else 0)
-            if st.button("Save Subfolder Config"):
-                config['subfolder_action_set'] = new_sub
-                save_config(config, config_path)
-                st.success("Subfolder Settings Updated!")
+            st.subheader("Subfolder Management")
+            cur_sub = config.get('subfolder_action_set', 'Event_Subfolders')
+            new_sub = st.selectbox("Subfolder Action Set", available_sets, index=available_sets.index(cur_sub) if cur_sub in available_sets else 0)
+            if new_sub != cur_sub:
+                if st.button("Save Subfolder Set"):
+                    config['subfolder_action_set'] = new_sub
+                    save_config(config, config_path)
+                    st.success("Subfolders Updated!")
