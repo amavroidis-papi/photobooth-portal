@@ -26,6 +26,7 @@ KNOWN_STATIONS = sorted([
     "Mini4Standard", "TXStandard"
 ])
 
+
 # --- CONNECT TO DROPBOX ---
 try:
     if DROPBOX_APP_KEY and DROPBOX_APP_SECRET and DROPBOX_REFRESH_TOKEN:
@@ -42,8 +43,9 @@ try:
         st.error("❌ Missing Dropbox Credentials! Please set DROPBOX_APP_KEY, DROPBOX_APP_SECRET, and DROPBOX_REFRESH_TOKEN in Heroku Config Vars.")
         st.stop()
         
-    # Test connection by getting current user
-    dbx.users_get_current_account()
+    # REMOVED: dbx.users_get_current_account() 
+    # This check caused the "missing_scope" error. 
+    # We proceed assuming file permissions (files.content.read/write) are correct.
     
 except Exception as e:
     st.error(f"Dropbox Connection Failed: {e}")
