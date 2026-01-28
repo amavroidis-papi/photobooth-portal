@@ -5,6 +5,7 @@ import pandas as pd
 import io
 import os
 import time
+from PIL import Image as PILImage
 
 # --- CONFIGURATION ---
 # V2 AUTHENTICATION VARS
@@ -26,6 +27,9 @@ KNOWN_STATIONS = sorted([
     "Mini2BackUp", "Mini2Standard", "Mini3", "Mini3BackUp", 
     "Mini4Standard", "TXStandard"
 ])
+
+# Subfolder options for events
+SUBFOLDER_OPTIONS = ["001", "002", "003", "004", "005", "006", "007", "008", "009"]
 
 # --- CONNECT TO DROPBOX (V2 AUTH LOGIC) ---
 try:
@@ -71,9 +75,22 @@ def get_fleet_data():
     return servers
 
 def get_available_actions():
+    """Get actions from Global folder (legacy)."""
     actions = []
     try:
         res = dbx.files_list_folder(ACTIONS_FOLDER)
+        for entry in res.entries:
+            if entry.name.endswith('.atn'):
+                actions.append(entry.name.replace(".atn", ""))
+    except: pass
+    return sorted(actions)
+
+def get_station_actions(station_id):
+    """Get actions from station's local folder."""
+    actions = []
+    try:
+        station_actions_path = f"/{station_id}/actions"
+        res = dbx.files_list_folder(station_actions_path)
         for entry in res.entries:
             if entry.name.endswith('.atn'):
                 actions.append(entry.name.replace(".atn", ""))
@@ -117,6 +134,73 @@ def save_config(config_data, path):
 def upload_asset(uploaded_file, target_path):
     dbx.files_upload(uploaded_file.getvalue(), target_path, mode=dropbox.files.WriteMode.overwrite)
 
+def upload_action_to_station(uploaded_file, station_id, target_type, subfolder=None):
+    """
+    Upload action file to station's /actions/ folder with proper naming.
+    
+    Args:
+        uploaded_file: The uploaded .atn file
+        station_id: Target station (e.g., "HP1")
+        target_type: "root" or "subfolder"
+        subfolder: Subfolder number (e.g., "001") if target_type is "subfolder"
+    
+    Returns:
+        (success: bool, message: str)
+    """
+    try:
+        # Determine target filename
+        if target_type == "root":
+            target_filename = f"{station_id}_Root.atn"
+            trigger_path = f"/{station_id}/incoming/_trigger_reload.jpg"
+        else:
+            target_filename = f"{station_id}_{subfolder}.atn"
+            trigger_path = f"/{station_id}/incoming/{subfolder}/_trigger_reload.jpg"
+        
+        # Ensure actions folder exists (upload will create it)
+        action_path = f"/{station_id}/actions/{target_filename}"
+        
+        # Upload the action file
+        dbx.files_upload(
+            uploaded_file.getvalue(), 
+            action_path, 
+            mode=dropbox.files.WriteMode.overwrite
+        )
+        
+        # Create and upload trigger file (small red image)
+        trigger_image = create_trigger_image()
+        dbx.files_upload(
+            trigger_image, 
+            trigger_path, 
+            mode=dropbox.files.WriteMode.overwrite
+        )
+        
+        return True, f"✅ Uploaded as {target_filename} and triggered reload!"
+        
+    except Exception as e:
+        return False, f"❌ Upload failed: {str(e)}"
+
+def create_trigger_image():
+    """Create a small trigger image (1x1 red pixel) as bytes."""
+    img = PILImage.new('RGB', (10, 10), color='red')
+    buffer = io.BytesIO()
+    img.save(buffer, format='JPEG', quality=50)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+def ensure_station_folders(station_id):
+    """Ensure station has required folders."""
+    folders = [
+        f"/{station_id}/actions",
+        f"/{station_id}/incoming",
+        f"/{station_id}/processed",
+        f"/{station_id}/final"
+    ]
+    for folder in folders:
+        try:
+            dbx.files_create_folder_v2(folder)
+        except:
+            pass  # Folder already exists
+
 # --- UI LAYOUT ---
 st.set_page_config(page_title="Photobooth Command", layout="wide", page_icon="📷")
 st.title("📷 Photobooth Fleet Command")
@@ -158,19 +242,13 @@ else:
 
 selected_station = st.sidebar.selectbox("Select Station to Configure", display_list)
 
-# --- PAGE 1: FLEET DASHBOARD (IF NO STATION SELECTED OR DASHBOARD MODE) ---
-# NOTE: Your requested code keeps it simple, but let's fix the Dashboard Crash here
-# We display the Dashboard if users select "All Stations" in filter context, 
-# but Streamlit runs top-to-bottom. We will inject the Dashboard view here 
-# if the sidebar filter is active, OR just show it at the top.
-# Let's keep your structure: Title -> Sidebar -> Main Area.
-
-# FIX: We render the Fleet Dashboard at the top if data exists
+# --- FLEET DASHBOARD ---
 if fleet_data:
-    with st.expander("🌍 Global Fleet Dashboard", expanded=True):
+    with st.expander("🌐 Global Fleet Dashboard", expanded=False):
         for data in fleet_data:
             sid = data.get('server_id')
-            st.subheader(f"🖥️ {sid} ({data.get('status')})")
+            version = data.get('version', 'Unknown')
+            st.subheader(f"🖥️ {sid} ({data.get('status')}) - {version}")
             
             active = data.get('active_stations', [])
             standby = data.get('standby_stations', [])
@@ -182,7 +260,6 @@ if fleet_data:
                 f"🔴 Unconfigured ({len(ghosts)})"
             ])
             
-            # FIXED: Standard if/else blocks to prevent 'With' object errors
             with t1:
                 if active:
                     st.success(", ".join(active))
@@ -202,6 +279,7 @@ if fleet_data:
                     st.caption("None")
             st.divider()
 
+# --- MAIN STATION CONFIGURATION ---
 if selected_station:
     st.header(f"🔧 Managing: {selected_station}")
     
@@ -211,6 +289,7 @@ if selected_station:
         st.warning(f"Config missing for {selected_station}")
         if st.button("Initialize Config Now"):
             config, config_path = create_default_config(selected_station)
+            ensure_station_folders(selected_station)
             st.rerun()
             
     if config:
@@ -235,10 +314,114 @@ if selected_station:
         st.divider()
 
         if is_enabled:
-            tab1, tab2, tab3 = st.tabs(["⚙️ Settings", "🎨 Assets", "🎬 Profiles & Actions"])
+            tab1, tab2, tab3, tab4 = st.tabs([
+                "🎬 Upload Actions", 
+                "⚙️ Settings", 
+                "🎨 Assets", 
+                "📋 Current Actions"
+            ])
             
-            # --- TAB 1: SETTINGS ---
+            # --- TAB 1: UPLOAD ACTIONS (NEW - Primary Tab) ---
             with tab1:
+                st.subheader("📤 Upload Action to Station")
+                
+                # Instructions Box
+                st.info("""
+                **📋 ACTION NAMING RULES**
+                
+                When creating actions in Photoshop, name them exactly as follows:
+                
+                **For ROOT uploads** (photos in main incoming folder):
+                - Create action named **"Portrait"** (for portrait photos)
+                - Create action named **"Landscape"** (for landscape photos)
+                
+                **For SUBFOLDER uploads** (photos in incoming/001, 002, etc.):
+                - Create action named **"Main"**
+                
+                The action SET name can be anything you want (e.g., "Wedding_Template.atn")
+                """)
+                
+                st.divider()
+                
+                # Target Selection
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    target_type = st.radio(
+                        "Upload Target",
+                        ["Root (incoming folder)", "Subfolder (001, 002, etc.)"],
+                        key="upload_target"
+                    )
+                
+                with col2:
+                    if "Subfolder" in target_type:
+                        subfolder = st.selectbox(
+                            "Select Subfolder",
+                            SUBFOLDER_OPTIONS,
+                            key="subfolder_select"
+                        )
+                    else:
+                        subfolder = None
+                        st.caption("Root actions handle Portrait & Landscape automatically")
+                
+                st.divider()
+                
+                # File Uploader
+                uploaded_action = st.file_uploader(
+                    "Select .atn file to upload",
+                    type=['atn'],
+                    key="action_uploader"
+                )
+                
+                if uploaded_action:
+                    # Show what will happen
+                    if "Root" in target_type:
+                        target_name = f"{selected_station}_Root.atn"
+                        st.caption(f"📁 Will be saved as: `/{selected_station}/actions/{target_name}`")
+                        st.caption(f"🎯 Trigger file will be placed in: `/{selected_station}/incoming/`")
+                    else:
+                        target_name = f"{selected_station}_{subfolder}.atn"
+                        st.caption(f"📁 Will be saved as: `/{selected_station}/actions/{target_name}`")
+                        st.caption(f"🎯 Trigger file will be placed in: `/{selected_station}/incoming/{subfolder}/`")
+                    
+                    # Upload Button
+                    if st.button("🚀 Upload & Apply", type="primary"):
+                        with st.spinner("Uploading and triggering reload..."):
+                            # Ensure folders exist
+                            ensure_station_folders(selected_station)
+                            if subfolder:
+                                try:
+                                    dbx.files_create_folder_v2(f"/{selected_station}/incoming/{subfolder}")
+                                except: pass
+                            
+                            # Upload
+                            target = "root" if "Root" in target_type else "subfolder"
+                            success, message = upload_action_to_station(
+                                uploaded_action, 
+                                selected_station, 
+                                target, 
+                                subfolder
+                            )
+                            
+                            if success:
+                                st.success(message)
+                                st.balloons()
+                            else:
+                                st.error(message)
+                
+                st.divider()
+                
+                # Show current station actions
+                st.subheader(f"📂 Current Actions for {selected_station}")
+                station_actions = get_station_actions(selected_station)
+                if station_actions:
+                    for action in station_actions:
+                        st.caption(f"✅ {action}.atn")
+                else:
+                    st.caption("No actions uploaded yet for this station.")
+            
+            # --- TAB 2: SETTINGS ---
+            with tab2:
                 c1, c2 = st.columns(2)
                 with c1:
                     curr_bg = config['settings'].get('remove_background', False)
@@ -264,94 +447,68 @@ if selected_station:
                         save_config(config, config_path)
                         st.toast("Updated Orientation")
 
-            # --- TAB 2: ASSETS ---
-            with tab2:
+            # --- TAB 3: ASSETS ---
+            with tab3:
                 st.subheader("Upload Assets")
                 st.caption(f"Target: /{selected_station}/templates/")
-                suffix = st.text_input("Sub-Profile (e.g., 001)", placeholder="Default")
+                suffix = st.text_input("Sub-Profile (e.g., 001)", placeholder="Default", key="asset_suffix")
                 
                 c1, c2 = st.columns(2)
                 with c1:
-                    bg = st.file_uploader("Background (.jpg)", type=['jpg', 'jpeg'])
+                    bg = st.file_uploader("Background (.jpg)", type=['jpg', 'jpeg'], key="bg_upload")
                     if bg and st.button("Upload BG"):
                         name = f"background{suffix}.jpg" if suffix else "background.jpg"
                         upload_asset(bg, f"/{selected_station}/templates/{name}")
                         st.success(f"Saved {name}")
                         time.sleep(1)
-                        st.rerun() # Auto-Refresh
+                        st.rerun()
                 with c2:
-                    ol = st.file_uploader("Overlay (.png)", type=['png'])
+                    ol = st.file_uploader("Overlay (.png)", type=['png'], key="overlay_upload")
                     if ol and st.button("Upload Overlay"):
                         name = f"overlay{suffix}.png" if suffix else "overlay.png"
                         upload_asset(ol, f"/{selected_station}/templates/{name}")
                         st.success(f"Saved {name}")
                         time.sleep(1)
-                        st.rerun() # Auto-Refresh
+                        st.rerun()
 
-            # --- TAB 3: ACTIONS ---
-            with tab3:
-                # 1. Fetch Lists
-                available_sets = get_available_actions()
-                if not available_sets: available_sets = ["Default"]
-
-                # 2. Root Actions
-                st.markdown("### Root Folder Actions (Single Photos)")
-                col_p, col_l = st.columns(2)
+            # --- TAB 4: CURRENT ACTIONS (View Only) ---
+            with tab4:
+                st.subheader("📋 Current Action Configuration")
                 
-                with col_p:
-                    st.caption("Portrait")
-                    cur_p_set = config['active_profile']['portrait'].get('action_set', '')
-                    cur_p_name = config['active_profile']['portrait'].get('action_name', 'Portrait')
-                    
-                    idx_p = available_sets.index(cur_p_set) if cur_p_set in available_sets else 0
-                    new_p_set = st.selectbox("Action File", available_sets, index=idx_p, key="p_set")
-                    new_p_name = st.text_input("Action Name", cur_p_name, key="p_name")
-
-                    if new_p_set != cur_p_set or new_p_name != cur_p_name:
-                        if st.button("Save Portrait"):
-                            config['active_profile']['portrait']['action_set'] = new_p_set
-                            config['active_profile']['portrait']['action_name'] = new_p_name
-                            save_config(config, config_path)
-                            st.success("Saved!")
-
-                with col_l:
-                    st.caption("Landscape")
-                    cur_l_set = config['active_profile']['landscape'].get('action_set', '')
-                    cur_l_name = config['active_profile']['landscape'].get('action_name', 'Landscape')
-                    
-                    idx_l = available_sets.index(cur_l_set) if cur_l_set in available_sets else 0
-                    new_l_set = st.selectbox("Action File", available_sets, index=idx_l, key="l_set")
-                    new_l_name = st.text_input("Action Name", cur_l_name, key="l_name")
-
-                    if new_l_set != cur_l_set or new_l_name != cur_l_name:
-                        if st.button("Save Landscape"):
-                            config['active_profile']['landscape']['action_set'] = new_l_set
-                            config['active_profile']['landscape']['action_name'] = new_l_name
-                            save_config(config, config_path)
-                            st.success("Saved!")
-
-                st.divider()
-
-                # 3. Subfolder Actions
-                st.markdown("### Event Subfolder Actions (001...)")
-                cur_sub_set = config.get('subfolder_action_set', 'Event_Subfolders')
-                idx_sub = available_sets.index(cur_sub_set) if cur_sub_set in available_sets else 0
+                st.markdown("### Station Actions")
+                station_actions = get_station_actions(selected_station)
+                if station_actions:
+                    for action in station_actions:
+                        if "_Root" in action:
+                            st.success(f"🏠 **Root:** {action}.atn → Uses actions 'Portrait' & 'Landscape'")
+                        elif "_" in action:
+                            parts = action.split("_")
+                            if len(parts) >= 2:
+                                subfolder = parts[-1]
+                                st.info(f"📁 **Subfolder {subfolder}:** {action}.atn → Uses action 'Main'")
+                        else:
+                            st.caption(f"📄 {action}.atn")
+                else:
+                    st.warning("No actions uploaded for this station yet.")
                 
-                new_sub_set = st.selectbox("Subfolder Action Set", available_sets, index=idx_sub, key="sub_set")
-                
-                if new_sub_set != cur_sub_set:
-                    if st.button("Update Subfolder Set"):
-                        config['subfolder_action_set'] = new_sub_set
-                        save_config(config, config_path)
-                        st.success("Updated!")
-
                 st.divider()
                 
-                # 4. Uploader
-                st.subheader("Upload New .atn File")
-                up_atn = st.file_uploader("Select .atn file", type=['atn'])
-                if up_atn and st.button("Upload Action to Cloud"):
-                    upload_asset(up_atn, f"{ACTIONS_FOLDER}/{up_atn.name}")
-                    st.success("Uploaded!")
-                    time.sleep(1)
-                    st.rerun() # Auto-Refresh Dropdowns
+                st.markdown("### Legacy Global Actions")
+                st.caption("These are in the old /_Global_Assets/Actions/ folder:")
+                global_actions = get_available_actions()
+                if global_actions:
+                    st.caption(", ".join(global_actions))
+                else:
+                    st.caption("None")
+                
+                st.divider()
+                
+                # Legacy uploader (for backwards compatibility)
+                with st.expander("⚠️ Legacy: Upload to Global Actions (Old System)"):
+                    st.warning("This uploads to the shared Global folder. Use 'Upload Actions' tab for the new per-station system.")
+                    up_atn = st.file_uploader("Select .atn file", type=['atn'], key="legacy_upload")
+                    if up_atn and st.button("Upload to Global"):
+                        upload_asset(up_atn, f"{ACTIONS_FOLDER}/{up_atn.name}")
+                        st.success("Uploaded to Global!")
+                        time.sleep(1)
+                        st.rerun()
