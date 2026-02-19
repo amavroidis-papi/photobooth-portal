@@ -354,4 +354,4 @@ if selected_station:
                     upload_asset(up_atn, f"{ACTIONS_FOLDER}/{up_atn.name}")
                     st.success("Uploaded!")
                     time.sleep(1)
-                    st.rerun() # Auto-Refresh Dropdowns
+                    st.rerun() # Auto-Refresh Dropdowns 
