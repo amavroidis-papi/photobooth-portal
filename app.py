@@ -118,11 +118,11 @@ def upload_asset(uploaded_file, target_path):
     dbx.files_upload(uploaded_file.getvalue(), target_path, mode=dropbox.files.WriteMode.overwrite)
 
 # --- UI LAYOUT ---
-st.set_page_config(page_title="Photobooth Command", layout="wide", page_icon="ðŸ“·")
-st.title("ðŸ“· Photobooth Fleet Command")
+st.set_page_config(page_title="Photobooth Command", layout="wide", page_icon="📷")
+st.title("📷 Photobooth Fleet Command")
 
 # 1. SIDEBAR - FLEET VIEW
-st.sidebar.header("ðŸ“¡ Live Status")
+st.sidebar.header("📡 Live Status")
 fleet_data = get_fleet_data()
 if fleet_data:
     df = pd.DataFrame(fleet_data)
@@ -141,7 +141,7 @@ else:
 st.sidebar.divider()
 
 # 2. STATION SELECTOR
-st.sidebar.header("ðŸŽ® Station Manager")
+st.sidebar.header("🎮 Station Manager")
 
 # Logic: If a server is filtered, show only its stations. Otherwise, show ALL.
 if filter_server != "All Stations":
@@ -167,19 +167,19 @@ selected_station = st.sidebar.selectbox("Select Station to Configure", display_l
 
 # FIX: We render the Fleet Dashboard at the top if data exists
 if fleet_data:
-    with st.expander("ðŸŒ Global Fleet Dashboard", expanded=True):
+    with st.expander("🌍 Global Fleet Dashboard", expanded=True):
         for data in fleet_data:
             sid = data.get('server_id')
-            st.subheader(f"ðŸ–¥ï¸ {sid} ({data.get('status')})")
+            st.subheader(f"🖥️ {sid} ({data.get('status')})")
             
             active = data.get('active_stations', [])
             standby = data.get('standby_stations', [])
             ghosts = data.get('unconfigured_stations', [])
 
             t1, t2, t3 = st.tabs([
-                f"ðŸŸ¢ Active ({len(active)})", 
-                f"ðŸŸ¡ Standby ({len(standby)})", 
-                f"ðŸ”´ Unconfigured ({len(ghosts)})"
+                f"🟢 Active ({len(active)})", 
+                f"🟡 Standby ({len(standby)})", 
+                f"🔴 Unconfigured ({len(ghosts)})"
             ])
             
             # FIXED: Standard if/else blocks to prevent 'With' object errors
@@ -203,7 +203,7 @@ if fleet_data:
             st.divider()
 
 if selected_station:
-    st.header(f"ðŸ”§ Managing: {selected_station}")
+    st.header(f"🔧 Managing: {selected_station}")
     
     config, config_path = load_config(selected_station)
     
@@ -223,9 +223,9 @@ if selected_station:
             new_enabled = st.toggle("Station ON/OFF", value=is_enabled)
         with col_st:
             if new_enabled:
-                st.markdown("### ðŸŸ¢ Active")
+                st.markdown("### 🟢 Active")
             else:
-                st.markdown("### ðŸ”´ Disabled (Ignoring Photos)")
+                st.markdown("### 🔴 Disabled (Ignoring Photos)")
         
         if new_enabled != is_enabled:
             config["station_enabled"] = new_enabled
@@ -235,7 +235,7 @@ if selected_station:
         st.divider()
 
         if is_enabled:
-            tab1, tab2, tab3 = st.tabs(["âš™ï¸ Settings", "ðŸŽ¨ Assets", "ðŸŽ¬ Profiles & Actions"])
+            tab1, tab2, tab3 = st.tabs(["⚙️ Settings", "🎨 Assets", "🎬 Profiles & Actions"])
             
             # --- TAB 1: SETTINGS ---
             with tab1:
