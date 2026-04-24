@@ -17,6 +17,7 @@ DROPBOX_TOKEN = os.environ.get("DROPBOX_TOKEN")
 GLOBAL_ASSETS = "/_Global_Assets"
 ACTIONS_FOLDER = f"{GLOBAL_ASSETS}/Actions"
 HEALTH_FOLDER = f"{GLOBAL_ASSETS}/_Server_Health"
+PHOTOSHOP_SCRIPTS_FOLDER = f"{GLOBAL_ASSETS}/PhotoshopScripts"
 
 # MASTER STATION LIST
 KNOWN_STATIONS = sorted([
@@ -116,6 +117,58 @@ def save_config(config_data, path):
 
 def upload_asset(uploaded_file, target_path):
     dbx.files_upload(uploaded_file.getvalue(), target_path, mode=dropbox.files.WriteMode.overwrite)
+
+def dropbox_user_path(dropbox_path):
+    return f"~/Library/CloudStorage/Dropbox{dropbox_path}"
+
+def dropbox_file_exists(path):
+    try:
+        dbx.files_get_metadata(path)
+        return True
+    except:
+        return False
+
+def resolve_authoring_template_path(station_id, kind, suffix):
+    extensions = [".png"] if kind == "overlay" else [".jpg", ".jpeg", ".png"]
+    base = f"/{station_id}/templates/authoring"
+    names = []
+    if suffix:
+        for ext in extensions:
+            names.append(f"{kind}{suffix}{ext}")
+    for ext in extensions:
+        names.append(f"{kind}{ext}")
+
+    for name in names:
+        path = f"{base}/{name}"
+        if dropbox_file_exists(path):
+            return dropbox_user_path(path)
+    return ""
+
+def update_authoring_context(station_id, suffix):
+    context = {
+        "station_id": station_id,
+        "subfolder": suffix,
+        "background": resolve_authoring_template_path(station_id, "background", suffix),
+        "overlay": resolve_authoring_template_path(station_id, "overlay", suffix),
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
+    ensure_dropbox_folder(PHOTOSHOP_SCRIPTS_FOLDER)
+    dbx.files_upload(
+        json.dumps(context, indent=2).encode("utf-8"),
+        f"{PHOTOSHOP_SCRIPTS_FOLDER}/authoring_context.json",
+        mode=dropbox.files.WriteMode.overwrite
+    )
+    return context
+
+def upload_template_asset(uploaded_file, station_id, name, suffix):
+    target_path = f"/{station_id}/templates/{name}"
+    authoring_path = f"/{station_id}/templates/authoring/{name}"
+    ensure_dropbox_folder(f"/{station_id}/templates")
+    ensure_dropbox_folder(f"/{station_id}/templates/authoring")
+    data = uploaded_file.getvalue()
+    dbx.files_upload(data, target_path, mode=dropbox.files.WriteMode.overwrite)
+    dbx.files_upload(data, authoring_path, mode=dropbox.files.WriteMode.overwrite)
+    update_authoring_context(station_id, suffix)
 
 def ensure_dropbox_folder(folder_path):
     try:
@@ -347,7 +400,7 @@ if selected_station:
                     bg = st.file_uploader("Background (.jpg)", type=['jpg', 'jpeg'])
                     if bg and st.button("Upload BG"):
                         name = f"background{suffix}.jpg" if suffix else "background.jpg"
-                        upload_asset(bg, f"/{selected_station}/templates/{name}")
+                        upload_template_asset(bg, selected_station, name, suffix)
                         st.success(f"Saved {name}")
                         time.sleep(1)
                         st.rerun() # Auto-Refresh
@@ -355,7 +408,7 @@ if selected_station:
                     ol = st.file_uploader("Overlay (.png)", type=['png'])
                     if ol and st.button("Upload Overlay"):
                         name = f"overlay{suffix}.png" if suffix else "overlay.png"
-                        upload_asset(ol, f"/{selected_station}/templates/{name}")
+                        upload_template_asset(ol, selected_station, name, suffix)
                         st.success(f"Saved {name}")
                         time.sleep(1)
                         st.rerun() # Auto-Refresh
