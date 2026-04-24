@@ -18,6 +18,7 @@ GLOBAL_ASSETS = "/_Global_Assets"
 ACTIONS_FOLDER = f"{GLOBAL_ASSETS}/Actions"
 HEALTH_FOLDER = f"{GLOBAL_ASSETS}/_Server_Health"
 PHOTOSHOP_SCRIPTS_FOLDER = f"{GLOBAL_ASSETS}/PhotoshopScripts"
+LOGO_URL = "https://photos.smugmug.com/photos/i-JGmn4QZ/0/Kfbh3K2TsxsddC59CndM9vRx45XBzmXGDx4MfS5CV/O/i-JGmn4QZ.png"
 
 # MASTER STATION LIST
 KNOWN_STATIONS = sorted([
@@ -288,6 +289,7 @@ st.set_page_config(page_title="Photobooth Command", layout="wide", page_icon="�
 st.title("📷 Photobooth Fleet Command")
 
 # 1. SIDEBAR - FLEET VIEW
+st.sidebar.image(LOGO_URL, use_container_width=True)
 st.sidebar.header("📡 Live Status")
 fleet_data = get_fleet_data()
 if fleet_data:
