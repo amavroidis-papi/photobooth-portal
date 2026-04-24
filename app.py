@@ -289,7 +289,7 @@ st.set_page_config(page_title="Photobooth Command", layout="wide", page_icon="�
 st.title("📷 Photobooth Fleet Command")
 
 # 1. SIDEBAR - FLEET VIEW
-st.sidebar.image(LOGO_URL, use_container_width=True)
+st.sidebar.image(LOGO_URL, width=140)
 st.sidebar.header("📡 Live Status")
 fleet_data = get_fleet_data()
 if fleet_data:
