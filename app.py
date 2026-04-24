@@ -320,7 +320,7 @@ if selected_station:
                     cur_p_name = config['active_profile']['portrait'].get('action_name', 'Portrait')
                     
                     idx_p = global_action_sets.index(cur_p_set) if cur_p_set in global_action_sets else 0
-                    new_p_set = st.selectbox("Global Action File", global_action_sets, index=idx_p, key="p_set")
+                    new_p_set = st.selectbox("Global Action Set", global_action_sets, index=idx_p, key="p_set")
                     new_p_name = st.text_input("Action Name", cur_p_name, key="p_name")
 
                     if new_p_set != cur_p_set or new_p_name != cur_p_name:
@@ -336,7 +336,7 @@ if selected_station:
                     cur_l_name = config['active_profile']['landscape'].get('action_name', 'Landscape')
                     
                     idx_l = global_action_sets.index(cur_l_set) if cur_l_set in global_action_sets else 0
-                    new_l_set = st.selectbox("Global Action File", global_action_sets, index=idx_l, key="l_set")
+                    new_l_set = st.selectbox("Global Action Set", global_action_sets, index=idx_l, key="l_set")
                     new_l_name = st.text_input("Action Name", cur_l_name, key="l_name")
 
                     if new_l_set != cur_l_set or new_l_name != cur_l_name:
@@ -354,7 +354,7 @@ if selected_station:
                 cur_sub_set = config.get('subfolder_action_set', 'Event_Subfolders')
                 idx_sub = station_action_sets.index(cur_sub_set) if cur_sub_set in station_action_sets else 0
                 
-                new_sub_set = st.selectbox("Station Action File", station_action_sets, index=idx_sub, key="sub_set")
+                new_sub_set = st.selectbox("Station Action Set", station_action_sets, index=idx_sub, key="sub_set")
                 
                 if new_sub_set != cur_sub_set:
                     if st.button("Update Subfolder Set"):
