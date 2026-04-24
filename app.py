@@ -242,6 +242,47 @@ def action_name_input(label, current_value, available_actions, key):
         return st.selectbox(label, options, index=index, key=key)
     return st.text_input(label, current_value, key=key)
 
+def unique_test_filename(original_name):
+    name, ext = os.path.splitext(original_name)
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    safe_name = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in name)
+    return f"portal_test_{timestamp}_{safe_name}{ext.lower()}"
+
+def upload_test_photo(uploaded_file, station_id, subfolder):
+    filename = unique_test_filename(uploaded_file.name)
+    incoming_folder = f"/{station_id}/incoming"
+    if subfolder:
+        incoming_folder = f"{incoming_folder}/{subfolder}"
+    ensure_dropbox_folder(incoming_folder)
+    target_path = f"{incoming_folder}/{filename}"
+    dbx.files_upload(uploaded_file.getvalue(), target_path, mode=dropbox.files.WriteMode.overwrite)
+    return filename, target_path
+
+def find_final_output(station_id, subfolder, filename):
+    name, _ = os.path.splitext(filename)
+    final_folder = f"/{station_id}/final"
+    if subfolder:
+        final_folder = f"{final_folder}/{subfolder}"
+    final_path = f"{final_folder}/{name}.jpg"
+    try:
+        dbx.files_get_metadata(final_path)
+        return final_path
+    except:
+        return None
+
+def wait_for_final_output(station_id, subfolder, filename, timeout_seconds=45):
+    start = time.time()
+    while time.time() - start < timeout_seconds:
+        final_path = find_final_output(station_id, subfolder, filename)
+        if final_path:
+            return final_path
+        time.sleep(3)
+    return None
+
+def download_dropbox_file(path):
+    _, res = dbx.files_download(path)
+    return res.content
+
 # --- UI LAYOUT ---
 st.set_page_config(page_title="Photobooth Command", layout="wide", page_icon="📷")
 st.title("📷 Photobooth Fleet Command")
@@ -360,7 +401,7 @@ if selected_station:
         st.divider()
 
         if is_enabled:
-            tab1, tab2, tab3 = st.tabs(["⚙️ Settings", "🎨 Assets", "🎬 Profiles & Actions"])
+            tab1, tab2, tab3, tab4 = st.tabs(["⚙️ Settings", "🎨 Assets", "🎬 Profiles & Actions", "🧪 Test Output"])
             
             # --- TAB 1: SETTINGS ---
             with tab1:
@@ -537,3 +578,37 @@ if selected_station:
                         st.success(f"Saved metadata for {station_meta_set}")
                         time.sleep(1)
                         st.rerun()
+
+            # --- TAB 4: TEST OUTPUT ---
+            with tab4:
+                st.subheader("Test Station Output")
+                st.caption("Uploads one test photo into the selected station queue and waits briefly for the final JPG.")
+
+                test_photo = st.file_uploader("Test photo", type=['jpg', 'jpeg', 'png'], key="test_photo")
+                test_route = st.selectbox("Test route", ["Root incoming", "Event subfolder"], key="test_route")
+                test_subfolder = ""
+                if test_route == "Event subfolder":
+                    test_subfolder = st.text_input("Subfolder", value="001", max_chars=3, key="test_subfolder").strip()
+
+                if test_photo and st.button("Run Test Photo"):
+                    if test_route == "Event subfolder" and not test_subfolder:
+                        st.error("Enter a subfolder such as 001.")
+                    else:
+                        filename, incoming_path = upload_test_photo(test_photo, selected_station, test_subfolder)
+                        st.info(f"Uploaded to {incoming_path}")
+
+                        with st.spinner("Waiting for final output..."):
+                            final_path = wait_for_final_output(selected_station, test_subfolder, filename)
+
+                        if final_path:
+                            final_bytes = download_dropbox_file(final_path)
+                            st.success(f"Final output ready: {final_path}")
+                            st.image(final_bytes, caption=os.path.basename(final_path), use_container_width=True)
+                            st.download_button(
+                                "Download Final JPG",
+                                data=final_bytes,
+                                file_name=os.path.basename(final_path),
+                                mime="image/jpeg"
+                            )
+                        else:
+                            st.warning("Final output was not found within 45 seconds. Check the station failed folder or email alerts.")
