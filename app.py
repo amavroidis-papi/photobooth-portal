@@ -70,10 +70,10 @@ def get_fleet_data():
     except: pass
     return servers
 
-def get_available_actions():
+def get_available_actions(folder_path=ACTIONS_FOLDER):
     actions = []
     try:
-        res = dbx.files_list_folder(ACTIONS_FOLDER)
+        res = dbx.files_list_folder(folder_path)
         for entry in res.entries:
             if entry.name.endswith('.atn'):
                 actions.append(entry.name.replace(".atn", ""))
@@ -116,6 +116,18 @@ def save_config(config_data, path):
 
 def upload_asset(uploaded_file, target_path):
     dbx.files_upload(uploaded_file.getvalue(), target_path, mode=dropbox.files.WriteMode.overwrite)
+
+def ensure_dropbox_folder(folder_path):
+    try:
+        dbx.files_create_folder_v2(folder_path)
+    except:
+        pass
+
+def upload_action_file(uploaded_file, target_folder):
+    ensure_dropbox_folder(target_folder)
+    target_path = f"{target_folder}/{uploaded_file.name}"
+    dbx.files_upload(uploaded_file.getvalue(), target_path, mode=dropbox.files.WriteMode.overwrite)
+    return target_path
 
 # --- UI LAYOUT ---
 st.set_page_config(page_title="Photobooth Command", layout="wide", page_icon="📷")
@@ -291,11 +303,15 @@ if selected_station:
             # --- TAB 3: ACTIONS ---
             with tab3:
                 # 1. Fetch Lists
-                available_sets = get_available_actions()
-                if not available_sets: available_sets = ["Default"]
+                station_actions_folder = f"/{selected_station}/actions"
+                global_action_sets = get_available_actions(ACTIONS_FOLDER)
+                station_action_sets = get_available_actions(station_actions_folder)
+                if not global_action_sets: global_action_sets = ["Default"]
+                if not station_action_sets: station_action_sets = ["Event_Subfolders"]
 
                 # 2. Root Actions
                 st.markdown("### Root Folder Actions (Single Photos)")
+                st.caption(f"Action files are loaded from {ACTIONS_FOLDER}")
                 col_p, col_l = st.columns(2)
                 
                 with col_p:
@@ -303,8 +319,8 @@ if selected_station:
                     cur_p_set = config['active_profile']['portrait'].get('action_set', '')
                     cur_p_name = config['active_profile']['portrait'].get('action_name', 'Portrait')
                     
-                    idx_p = available_sets.index(cur_p_set) if cur_p_set in available_sets else 0
-                    new_p_set = st.selectbox("Action File", available_sets, index=idx_p, key="p_set")
+                    idx_p = global_action_sets.index(cur_p_set) if cur_p_set in global_action_sets else 0
+                    new_p_set = st.selectbox("Global Action File", global_action_sets, index=idx_p, key="p_set")
                     new_p_name = st.text_input("Action Name", cur_p_name, key="p_name")
 
                     if new_p_set != cur_p_set or new_p_name != cur_p_name:
@@ -319,8 +335,8 @@ if selected_station:
                     cur_l_set = config['active_profile']['landscape'].get('action_set', '')
                     cur_l_name = config['active_profile']['landscape'].get('action_name', 'Landscape')
                     
-                    idx_l = available_sets.index(cur_l_set) if cur_l_set in available_sets else 0
-                    new_l_set = st.selectbox("Action File", available_sets, index=idx_l, key="l_set")
+                    idx_l = global_action_sets.index(cur_l_set) if cur_l_set in global_action_sets else 0
+                    new_l_set = st.selectbox("Global Action File", global_action_sets, index=idx_l, key="l_set")
                     new_l_name = st.text_input("Action Name", cur_l_name, key="l_name")
 
                     if new_l_set != cur_l_set or new_l_name != cur_l_name:
@@ -334,10 +350,11 @@ if selected_station:
 
                 # 3. Subfolder Actions
                 st.markdown("### Event Subfolder Actions (001...)")
+                st.caption(f"Action files are loaded from {station_actions_folder}")
                 cur_sub_set = config.get('subfolder_action_set', 'Event_Subfolders')
-                idx_sub = available_sets.index(cur_sub_set) if cur_sub_set in available_sets else 0
+                idx_sub = station_action_sets.index(cur_sub_set) if cur_sub_set in station_action_sets else 0
                 
-                new_sub_set = st.selectbox("Subfolder Action Set", available_sets, index=idx_sub, key="sub_set")
+                new_sub_set = st.selectbox("Station Action File", station_action_sets, index=idx_sub, key="sub_set")
                 
                 if new_sub_set != cur_sub_set:
                     if st.button("Update Subfolder Set"):
@@ -349,9 +366,22 @@ if selected_station:
                 
                 # 4. Uploader
                 st.subheader("Upload New .atn File")
-                up_atn = st.file_uploader("Select .atn file", type=['atn'])
-                if up_atn and st.button("Upload Action to Cloud"):
-                    upload_asset(up_atn, f"{ACTIONS_FOLDER}/{up_atn.name}")
-                    st.success("Uploaded!")
-                    time.sleep(1)
-                    st.rerun() # Auto-Refresh Dropdowns 
+                col_global_up, col_station_up = st.columns(2)
+
+                with col_global_up:
+                    st.caption("Global root-photo action sets")
+                    up_global_atn = st.file_uploader("Upload global .atn", type=['atn'], key="global_atn")
+                    if up_global_atn and st.button("Upload Global Action"):
+                        upload_action_file(up_global_atn, ACTIONS_FOLDER)
+                        st.success(f"Uploaded to {ACTIONS_FOLDER}")
+                        time.sleep(1)
+                        st.rerun()
+
+                with col_station_up:
+                    st.caption("Station event-subfolder action sets")
+                    up_station_atn = st.file_uploader("Upload station .atn", type=['atn'], key="station_atn")
+                    if up_station_atn and st.button("Upload Station Action"):
+                        upload_action_file(up_station_atn, station_actions_folder)
+                        st.success(f"Uploaded to {station_actions_folder}")
+                        time.sleep(1)
+                        st.rerun() # Auto-Refresh Dropdowns 
