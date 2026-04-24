@@ -129,6 +129,48 @@ def upload_action_file(uploaded_file, target_folder):
     dbx.files_upload(uploaded_file.getvalue(), target_path, mode=dropbox.files.WriteMode.overwrite)
     return target_path
 
+def load_action_metadata(folder_path, action_set):
+    path = f"{folder_path}/{action_set}.json"
+    try:
+        _, res = dbx.files_download(path)
+        data = json.load(io.BytesIO(res.content))
+        actions = data.get("actions", [])
+        return [a for a in actions if isinstance(a, str) and a.strip()]
+    except:
+        return []
+
+def save_action_metadata(folder_path, action_set, action_text):
+    actions = []
+    seen = set()
+    for line in action_text.splitlines():
+        action = line.strip()
+        if action and action not in seen:
+            actions.append(action)
+            seen.add(action)
+
+    metadata = {
+        "action_set": action_set,
+        "actions": actions,
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
+    ensure_dropbox_folder(folder_path)
+    path = f"{folder_path}/{action_set}.json"
+    dbx.files_upload(
+        json.dumps(metadata, indent=2).encode("utf-8"),
+        path,
+        mode=dropbox.files.WriteMode.overwrite
+    )
+    return actions
+
+def action_name_input(label, current_value, available_actions, key):
+    if available_actions:
+        options = available_actions
+        if current_value and current_value not in options:
+            options = [current_value] + options
+        index = options.index(current_value) if current_value in options else 0
+        return st.selectbox(label, options, index=index, key=key)
+    return st.text_input(label, current_value, key=key)
+
 # --- UI LAYOUT ---
 st.set_page_config(page_title="Photobooth Command", layout="wide", page_icon="📷")
 st.title("📷 Photobooth Fleet Command")
@@ -321,7 +363,8 @@ if selected_station:
                     
                     idx_p = global_action_sets.index(cur_p_set) if cur_p_set in global_action_sets else 0
                     new_p_set = st.selectbox("Global Action Set", global_action_sets, index=idx_p, key="p_set")
-                    new_p_name = st.text_input("Action Name", cur_p_name, key="p_name")
+                    p_actions = load_action_metadata(ACTIONS_FOLDER, new_p_set)
+                    new_p_name = action_name_input("Action Name", cur_p_name, p_actions, "p_name")
 
                     if new_p_set != cur_p_set or new_p_name != cur_p_name:
                         if st.button("Save Portrait"):
@@ -337,7 +380,8 @@ if selected_station:
                     
                     idx_l = global_action_sets.index(cur_l_set) if cur_l_set in global_action_sets else 0
                     new_l_set = st.selectbox("Global Action Set", global_action_sets, index=idx_l, key="l_set")
-                    new_l_name = st.text_input("Action Name", cur_l_name, key="l_name")
+                    l_actions = load_action_metadata(ACTIONS_FOLDER, new_l_set)
+                    new_l_name = action_name_input("Action Name", cur_l_name, l_actions, "l_name")
 
                     if new_l_set != cur_l_set or new_l_name != cur_l_name:
                         if st.button("Save Landscape"):
@@ -355,6 +399,11 @@ if selected_station:
                 idx_sub = station_action_sets.index(cur_sub_set) if cur_sub_set in station_action_sets else 0
                 
                 new_sub_set = st.selectbox("Station Action Set", station_action_sets, index=idx_sub, key="sub_set")
+                sub_actions = load_action_metadata(station_actions_folder, new_sub_set)
+                if sub_actions:
+                    st.caption("Actions in this set: " + ", ".join(sub_actions[:8]) + ("..." if len(sub_actions) > 8 else ""))
+                else:
+                    st.caption("No metadata found yet. Upload or update metadata below to enable dropdowns.")
                 
                 if new_sub_set != cur_sub_set:
                     if st.button("Update Subfolder Set"):
@@ -371,17 +420,45 @@ if selected_station:
                 with col_global_up:
                     st.caption("Global root-photo action sets")
                     up_global_atn = st.file_uploader("Upload global .atn", type=['atn'], key="global_atn")
+                    global_meta_set = st.text_input("Global action set name", value=(up_global_atn.name.replace(".atn", "") if up_global_atn else "Photobooth_Actions"), key="global_meta_set")
+                    existing_global_actions = load_action_metadata(ACTIONS_FOLDER, global_meta_set)
+                    global_action_text = st.text_area(
+                        "Actions inside global set",
+                        value="\n".join(existing_global_actions),
+                        key="global_action_text",
+                        placeholder="2x6_Strip\n4x6_Postcard"
+                    )
                     if up_global_atn and st.button("Upload Global Action"):
                         upload_action_file(up_global_atn, ACTIONS_FOLDER)
+                        save_action_metadata(ACTIONS_FOLDER, global_meta_set, global_action_text)
                         st.success(f"Uploaded to {ACTIONS_FOLDER}")
+                        time.sleep(1)
+                        st.rerun()
+                    elif st.button("Save Global Metadata"):
+                        save_action_metadata(ACTIONS_FOLDER, global_meta_set, global_action_text)
+                        st.success(f"Saved metadata for {global_meta_set}")
                         time.sleep(1)
                         st.rerun()
 
                 with col_station_up:
                     st.caption("Station event-subfolder action sets")
                     up_station_atn = st.file_uploader("Upload station .atn", type=['atn'], key="station_atn")
+                    station_meta_set = st.text_input("Station action set name", value=(up_station_atn.name.replace(".atn", "") if up_station_atn else cur_sub_set), key="station_meta_set")
+                    existing_station_actions = load_action_metadata(station_actions_folder, station_meta_set)
+                    station_action_text = st.text_area(
+                        "Actions inside station set",
+                        value="\n".join(existing_station_actions),
+                        key="station_action_text",
+                        placeholder=f"{selected_station}001\n{selected_station}002"
+                    )
                     if up_station_atn and st.button("Upload Station Action"):
                         upload_action_file(up_station_atn, station_actions_folder)
+                        save_action_metadata(station_actions_folder, station_meta_set, station_action_text)
                         st.success(f"Uploaded to {station_actions_folder}")
                         time.sleep(1)
                         st.rerun() # Auto-Refresh Dropdowns 
+                    elif st.button("Save Station Metadata"):
+                        save_action_metadata(station_actions_folder, station_meta_set, station_action_text)
+                        st.success(f"Saved metadata for {station_meta_set}")
+                        time.sleep(1)
+                        st.rerun()
