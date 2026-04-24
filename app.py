@@ -130,23 +130,41 @@ def upload_action_file(uploaded_file, target_folder):
     return target_path
 
 def load_action_metadata(folder_path, action_set):
-    path = f"{folder_path}/{action_set}.json"
-    try:
-        _, res = dbx.files_download(path)
-        data = json.load(io.BytesIO(res.content))
-        actions = data.get("actions", [])
-        return [a for a in actions if isinstance(a, str) and a.strip()]
-    except:
-        return []
+    candidate_names = [
+        action_set,
+        action_set.strip(),
+        action_set.replace(" ", "_"),
+        action_set.replace("_", " ")
+    ]
+    seen_paths = set()
+    for name in candidate_names:
+        path = f"{folder_path}/{name}.json"
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        try:
+            _, res = dbx.files_download(path)
+            data = json.load(io.BytesIO(res.content))
+            actions = data.get("actions", [])
+            return [a.strip() for a in actions if isinstance(a, str) and a.strip()]
+        except:
+            pass
+    return []
 
-def save_action_metadata(folder_path, action_set, action_text):
+def parse_action_lines(action_text):
     actions = []
-    seen = set()
     for line in action_text.splitlines():
         action = line.strip()
-        if action and action not in seen:
+        if action and action not in actions:
             actions.append(action)
-            seen.add(action)
+    return actions
+
+def save_action_metadata(folder_path, action_set, action_text, append_only=True):
+    existing_actions = load_action_metadata(folder_path, action_set) if append_only else []
+    actions = existing_actions[:]
+    for action in parse_action_lines(action_text):
+        if action not in actions:
+            actions.append(action)
 
     metadata = {
         "action_set": action_set,
@@ -422,9 +440,11 @@ if selected_station:
                     up_global_atn = st.file_uploader("Upload global .atn", type=['atn'], key="global_atn")
                     global_meta_set = st.text_input("Global action set name", value=(up_global_atn.name.replace(".atn", "") if up_global_atn else "Photobooth_Actions"), key="global_meta_set")
                     existing_global_actions = load_action_metadata(ACTIONS_FOLDER, global_meta_set)
+                    if existing_global_actions:
+                        st.caption("Existing actions: " + ", ".join(existing_global_actions[:8]) + ("..." if len(existing_global_actions) > 8 else ""))
                     global_action_text = st.text_area(
-                        "Actions inside global set",
-                        value="\n".join(existing_global_actions),
+                        "Add action names to global set",
+                        value="",
                         key="global_action_text",
                         placeholder="2x6_Strip\n4x6_Postcard"
                     )
@@ -445,9 +465,11 @@ if selected_station:
                     up_station_atn = st.file_uploader("Upload station .atn", type=['atn'], key="station_atn")
                     station_meta_set = st.text_input("Station action set name", value=(up_station_atn.name.replace(".atn", "") if up_station_atn else cur_sub_set), key="station_meta_set")
                     existing_station_actions = load_action_metadata(station_actions_folder, station_meta_set)
+                    if existing_station_actions:
+                        st.caption("Existing actions: " + ", ".join(existing_station_actions[:8]) + ("..." if len(existing_station_actions) > 8 else ""))
                     station_action_text = st.text_area(
-                        "Actions inside station set",
-                        value="\n".join(existing_station_actions),
+                        "Add action names to station set",
+                        value="",
                         key="station_action_text",
                         placeholder=f"{selected_station}001\n{selected_station}002"
                     )
