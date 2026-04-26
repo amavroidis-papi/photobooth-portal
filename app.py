@@ -372,7 +372,7 @@ def activate_event(event):
 
 def deactivate_event(event):
     config, config_path = load_config(event["station_id"])
-    if config:
+    if config and config.get("active_event_id") == event["event_id"]:
         config["station_enabled"] = False
         config["last_event_id"] = event["event_id"]
         config.pop("active_event_id", None)
@@ -383,6 +383,48 @@ def deactivate_event(event):
     event["deactivated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     save_event(event)
     return event
+
+def parse_event_datetime(value):
+    return datetime.strptime(value, "%Y-%m-%d %H:%M")
+
+def sync_events_now():
+    now = datetime.now()
+    events = list_events()
+    changes = []
+
+    active_by_station = {}
+    for event in events:
+        try:
+            start_at = parse_event_datetime(event.get("start_at", ""))
+            end_at = parse_event_datetime(event.get("end_at", ""))
+        except:
+            continue
+
+        if now >= end_at and event.get("status") != "completed":
+            deactivate_event(event)
+            changes.append(f"Completed {event.get('event_name')}")
+        elif start_at <= now < end_at:
+            station_id = event.get("station_id")
+            current = active_by_station.get(station_id)
+            if not current or parse_event_datetime(event.get("start_at")) > parse_event_datetime(current.get("start_at")):
+                active_by_station[station_id] = event
+        elif now < start_at and event.get("status") == "active":
+            event["status"] = "scheduled"
+            save_event(event)
+            config, config_path = load_config(event.get("station_id"))
+            if config and config.get("active_event_id") == event.get("event_id"):
+                config["station_enabled"] = False
+                config.pop("active_event_id", None)
+                config.pop("active_event_name", None)
+                save_config(config, config_path)
+            changes.append(f"Scheduled {event.get('event_name')}")
+
+    for event in active_by_station.values():
+        if event.get("status") != "active":
+            activate_event(event)
+            changes.append(f"Activated {event.get('event_name')}")
+
+    return changes
 
 # --- UI LAYOUT ---
 st.set_page_config(page_title="Photobooth Command", layout="wide", page_icon="📷")
@@ -414,7 +456,13 @@ st.sidebar.divider()
 
 # 2. PORTAL VIEW
 st.sidebar.header("🧭 Portal View")
-portal_view = st.sidebar.radio("Select View", ["Station Manager", "Events"], label_visibility="collapsed")
+if "portal_view" not in st.session_state:
+    st.session_state.portal_view = "Station Manager"
+if "pending_portal_view" in st.session_state:
+    st.session_state.portal_view = st.session_state.pop("pending_portal_view")
+if "pending_sidebar_station" in st.session_state:
+    st.session_state.sidebar_station = st.session_state.pop("pending_sidebar_station")
+portal_view = st.sidebar.radio("Select View", ["Station Manager", "Events"], key="portal_view", label_visibility="collapsed")
 
 st.sidebar.divider()
 
@@ -436,7 +484,9 @@ else:
 selected_station = None
 if portal_view == "Station Manager":
     st.sidebar.header("🎮 Station Manager")
-    selected_station = st.sidebar.selectbox("Select Station to Configure", display_list)
+    if "sidebar_station" in st.session_state and st.session_state.sidebar_station not in display_list:
+        display_list = sorted(display_list + [st.session_state.sidebar_station])
+    selected_station = st.sidebar.selectbox("Select Station to Configure", display_list, key="sidebar_station")
 
 # --- PAGE 1: FLEET DASHBOARD (IF NO STATION SELECTED OR DASHBOARD MODE) ---
 # NOTE: Your requested code keeps it simple, but let's fix the Dashboard Crash here
@@ -489,6 +539,15 @@ if portal_view == "Events":
     all_events = list_events()
     online_servers = sorted(list(set([s.get('server_id') for s in fleet_data if s.get('server_id')]))) if fleet_data else []
     server_options = sorted(list(set(online_servers + ["71946", "73780"])))
+
+    if st.button("Sync Events Now", key="sync_events_now"):
+        changes = sync_events_now()
+        if changes:
+            st.success("Updated: " + ", ".join(changes))
+        else:
+            st.info("No event status changes needed.")
+        time.sleep(1)
+        st.rerun()
 
     st.markdown("### Create Event")
     c_name, c_station, c_server = st.columns([2, 1, 1])
@@ -581,6 +640,11 @@ if portal_view == "Events":
                 st.success("Event completed and station disabled.")
                 time.sleep(1)
                 st.rerun()
+        if st.button("Customize Event", key="global_customize_event"):
+            st.session_state.customizing_event_id = selected_event_obj.get("event_id")
+            st.session_state.pending_portal_view = "Station Manager"
+            st.session_state.pending_sidebar_station = selected_event_obj.get("station_id")
+            st.rerun()
     else:
         st.info("No events found for this view.")
 
@@ -596,6 +660,16 @@ elif selected_station:
             st.rerun()
             
     if config:
+        customizing_event_id = st.session_state.get("customizing_event_id")
+        if customizing_event_id:
+            matching_events = [e for e in list_events() if e.get("event_id") == customizing_event_id]
+            if matching_events:
+                event = matching_events[0]
+                st.info(f"Customizing event: {event.get('event_name')} ({event.get('start_at')} - {event.get('end_at')})")
+            if st.button("Clear Event Context"):
+                st.session_state.pop("customizing_event_id", None)
+                st.rerun()
+
         # --- MASTER SWITCH ---
         is_enabled = config.get("station_enabled", True)
         
