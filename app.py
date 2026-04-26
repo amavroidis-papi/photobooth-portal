@@ -6,6 +6,7 @@ import io
 import os
 import time
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 # --- CONFIGURATION ---
 # V2 AUTHENTICATION VARS
@@ -21,6 +22,7 @@ HEALTH_FOLDER = f"{GLOBAL_ASSETS}/_Server_Health"
 PHOTOSHOP_SCRIPTS_FOLDER = f"{GLOBAL_ASSETS}/PhotoshopScripts"
 EVENTS_FOLDER = f"{GLOBAL_ASSETS}/Events"
 LOGO_URL = "https://photos.smugmug.com/photos/i-JGmn4QZ/0/Kfbh3K2TsxsddC59CndM9vRx45XBzmXGDx4MfS5CV/O/i-JGmn4QZ.png"
+APP_TIMEZONE = ZoneInfo("Europe/Athens")
 
 # MASTER STATION LIST
 KNOWN_STATIONS = sorted([
@@ -286,6 +288,12 @@ def download_dropbox_file(path):
     _, res = dbx.files_download(path)
     return res.content
 
+def app_now():
+    return datetime.now(APP_TIMEZONE)
+
+def app_timestamp():
+    return app_now().strftime("%Y-%m-%d %H:%M:%S")
+
 def slugify(value):
     cleaned = "".join(c.lower() if c.isalnum() else "_" for c in value.strip())
     while "__" in cleaned:
@@ -298,7 +306,7 @@ def build_event_id(event_name, station_id, start_dt):
 def save_event(event_data):
     ensure_dropbox_folder(EVENTS_FOLDER)
     path = f"{EVENTS_FOLDER}/{event_data['event_id']}.json"
-    event_data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    event_data["updated_at"] = app_timestamp()
     dbx.files_upload(
         json.dumps(event_data, indent=2).encode("utf-8"),
         path,
@@ -338,8 +346,8 @@ def create_event(event_name, station_id, assigned_server, start_date, start_time
         "start_at": start_dt.strftime("%Y-%m-%d %H:%M"),
         "end_at": end_dt.strftime("%Y-%m-%d %H:%M"),
         "timezone": "Europe/Athens",
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        "created_at": app_timestamp(),
+        "updated_at": app_timestamp()
     }
     save_event(event)
     return event
@@ -352,7 +360,7 @@ def activate_event(event):
             and existing_event.get("event_id") != event["event_id"]
         ):
             existing_event["status"] = "completed"
-            existing_event["deactivated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            existing_event["deactivated_at"] = app_timestamp()
             save_event(existing_event)
 
     config, config_path = load_config(event["station_id"])
@@ -366,7 +374,7 @@ def activate_event(event):
     save_config(config, config_path)
 
     event["status"] = "active"
-    event["activated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    event["activated_at"] = app_timestamp()
     save_event(event)
     return event
 
@@ -380,7 +388,7 @@ def deactivate_event(event):
         save_config(config, config_path)
 
     event["status"] = "completed"
-    event["deactivated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    event["deactivated_at"] = app_timestamp()
     save_event(event)
     return event
 
@@ -388,7 +396,7 @@ def parse_event_datetime(value):
     return datetime.strptime(value, "%Y-%m-%d %H:%M")
 
 def sync_events_now():
-    now = datetime.now()
+    now = app_now().replace(tzinfo=None)
     events = list_events()
     changes = []
 
@@ -560,14 +568,15 @@ if portal_view == "Events":
         event_server = st.selectbox("Assigned server", server_options, index=default_server_idx, key="global_event_server")
 
     c_start_date, c_start_time, c_end_date, c_end_time = st.columns(4)
+    current_app_time = app_now()
     with c_start_date:
-        event_start_date = st.date_input("Start date", value=datetime.now().date(), key="global_event_start_date")
+        event_start_date = st.date_input("Start date", value=current_app_time.date(), key="global_event_start_date")
     with c_start_time:
-        event_start_time = st.time_input("Start time", value=datetime.now().replace(minute=0, second=0, microsecond=0).time(), key="global_event_start_time")
+        event_start_time = st.time_input("Start time", value=current_app_time.replace(minute=0, second=0, microsecond=0).time(), key="global_event_start_time")
     with c_end_date:
-        event_end_date = st.date_input("End date", value=datetime.now().date(), key="global_event_end_date")
+        event_end_date = st.date_input("End date", value=current_app_time.date(), key="global_event_end_date")
     with c_end_time:
-        event_end_time = st.time_input("End time", value=datetime.now().replace(hour=min(datetime.now().hour + 4, 23), minute=0, second=0, microsecond=0).time(), key="global_event_end_time")
+        event_end_time = st.time_input("End time", value=current_app_time.replace(hour=min(current_app_time.hour + 4, 23), minute=0, second=0, microsecond=0).time(), key="global_event_end_time")
 
     if st.button("Create Event", key="global_create_event"):
         if not event_name.strip():
