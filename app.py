@@ -412,8 +412,13 @@ else:
 
 st.sidebar.divider()
 
-# 2. STATION SELECTOR
-st.sidebar.header("🎮 Station Manager")
+# 2. PORTAL VIEW
+st.sidebar.header("🧭 Portal View")
+portal_view = st.sidebar.radio("Select View", ["Station Manager", "Events"], label_visibility="collapsed")
+
+st.sidebar.divider()
+
+# 3. STATION SELECTOR
 
 # Logic: If a server is filtered, show only its stations. Otherwise, show ALL.
 if filter_server != "All Stations":
@@ -428,7 +433,10 @@ if filter_server != "All Stations":
 else:
     display_list = KNOWN_STATIONS
 
-selected_station = st.sidebar.selectbox("Select Station to Configure", display_list)
+selected_station = None
+if portal_view == "Station Manager":
+    st.sidebar.header("🎮 Station Manager")
+    selected_station = st.sidebar.selectbox("Select Station to Configure", display_list)
 
 # --- PAGE 1: FLEET DASHBOARD (IF NO STATION SELECTED OR DASHBOARD MODE) ---
 # NOTE: Your requested code keeps it simple, but let's fix the Dashboard Crash here
@@ -474,7 +482,109 @@ if fleet_data:
                     st.caption("None")
             st.divider()
 
-if selected_station:
+if portal_view == "Events":
+    st.header("📅 Events")
+    st.caption("Create events and manually activate/deactivate station processing.")
+
+    all_events = list_events()
+    online_servers = sorted(list(set([s.get('server_id') for s in fleet_data if s.get('server_id')]))) if fleet_data else []
+    server_options = sorted(list(set(online_servers + ["71946", "73780"])))
+
+    st.markdown("### Create Event")
+    c_name, c_station, c_server = st.columns([2, 1, 1])
+    with c_name:
+        event_name = st.text_input("Event name", key="global_event_name")
+    with c_station:
+        event_station = st.selectbox("Station", KNOWN_STATIONS, key="global_event_station")
+    with c_server:
+        default_server_idx = server_options.index("71946") if "71946" in server_options else 0
+        event_server = st.selectbox("Assigned server", server_options, index=default_server_idx, key="global_event_server")
+
+    c_start_date, c_start_time, c_end_date, c_end_time = st.columns(4)
+    with c_start_date:
+        event_start_date = st.date_input("Start date", value=datetime.now().date(), key="global_event_start_date")
+    with c_start_time:
+        event_start_time = st.time_input("Start time", value=datetime.now().replace(minute=0, second=0, microsecond=0).time(), key="global_event_start_time")
+    with c_end_date:
+        event_end_date = st.date_input("End date", value=datetime.now().date(), key="global_event_end_date")
+    with c_end_time:
+        event_end_time = st.time_input("End time", value=datetime.now().replace(hour=min(datetime.now().hour + 4, 23), minute=0, second=0, microsecond=0).time(), key="global_event_end_time")
+
+    if st.button("Create Event", key="global_create_event"):
+        if not event_name.strip():
+            st.error("Enter an event name.")
+        else:
+            try:
+                event = create_event(
+                    event_name.strip(),
+                    event_station,
+                    event_server,
+                    event_start_date,
+                    event_start_time,
+                    event_end_date,
+                    event_end_time
+                )
+                st.success(f"Created event: {event['event_name']}")
+                time.sleep(1)
+                st.rerun()
+            except ValueError as e:
+                st.error(str(e))
+
+    st.divider()
+
+    active_events = [e for e in all_events if e.get("status") == "active"]
+    upcoming_events = [e for e in all_events if e.get("status") == "scheduled"]
+    completed_events = [e for e in all_events if e.get("status") == "completed"]
+
+    event_bucket = st.selectbox("Show events", ["Active", "Upcoming", "Completed", "All"], key="event_bucket")
+    if event_bucket == "Active":
+        visible_events = active_events
+    elif event_bucket == "Upcoming":
+        visible_events = upcoming_events
+    elif event_bucket == "Completed":
+        visible_events = completed_events
+    else:
+        visible_events = all_events
+
+    st.markdown("### Event List")
+    if visible_events:
+        event_rows = [
+            {
+                "event_name": e.get("event_name"),
+                "station_id": e.get("station_id"),
+                "status": e.get("status"),
+                "start_at": e.get("start_at"),
+                "end_at": e.get("end_at"),
+                "assigned_server": e.get("assigned_server")
+            }
+            for e in visible_events
+        ]
+        st.dataframe(pd.DataFrame(event_rows), hide_index=True, use_container_width=True)
+
+        event_labels = [
+            f"{e.get('event_name')} | {e.get('station_id')} | {e.get('start_at')} | {e.get('status')}"
+            for e in visible_events
+        ]
+        selected_event_label = st.selectbox("Select event", event_labels, key="global_selected_event")
+        selected_event_obj = visible_events[event_labels.index(selected_event_label)]
+
+        c_activate, c_deactivate = st.columns(2)
+        with c_activate:
+            if st.button("Activate Selected Event", key="global_activate_event"):
+                activate_event(selected_event_obj)
+                st.success("Event activated and station enabled.")
+                time.sleep(1)
+                st.rerun()
+        with c_deactivate:
+            if st.button("Deactivate Selected Event", key="global_deactivate_event"):
+                deactivate_event(selected_event_obj)
+                st.success("Event completed and station disabled.")
+                time.sleep(1)
+                st.rerun()
+    else:
+        st.info("No events found for this view.")
+
+elif selected_station:
     st.header(f"🔧 Managing: {selected_station}")
     
     config, config_path = load_config(selected_station)
@@ -507,7 +617,7 @@ if selected_station:
         st.divider()
 
         if is_enabled:
-            tab1, tab2, tab3, tab4, tab5 = st.tabs(["⚙️ Settings", "🎨 Assets", "🎬 Profiles & Actions", "🧪 Test Output", "📅 Events"])
+            tab1, tab2, tab3, tab4 = st.tabs(["⚙️ Settings", "🎨 Assets", "🎬 Profiles & Actions", "🧪 Test Output"])
             
             # --- TAB 1: SETTINGS ---
             with tab1:
@@ -718,91 +828,3 @@ if selected_station:
                             )
                         else:
                             st.warning("Final output was not found within 45 seconds. Check the station failed folder or email alerts.")
-
-            # --- TAB 5: EVENTS ---
-            with tab5:
-                st.subheader("Events")
-                st.caption("Create events and manually activate/deactivate station processing.")
-
-                all_events = list_events()
-                station_events = [e for e in all_events if e.get("station_id") == selected_station]
-                online_servers = sorted(list(set([s.get('server_id') for s in fleet_data if s.get('server_id')]))) if fleet_data else []
-                assigned_default = config.get("assigned_server", config.get("server_id", "71946"))
-                server_options = sorted(list(set(online_servers + [assigned_default, "71946", "73780"])))
-
-                st.markdown("### Create Event")
-                c_name, c_server = st.columns([2, 1])
-                with c_name:
-                    event_name = st.text_input("Event name", key="event_name")
-                with c_server:
-                    default_server_idx = server_options.index(assigned_default) if assigned_default in server_options else 0
-                    event_server = st.selectbox("Assigned server", server_options, index=default_server_idx, key="event_server")
-
-                c_start_date, c_start_time, c_end_date, c_end_time = st.columns(4)
-                with c_start_date:
-                    event_start_date = st.date_input("Start date", value=datetime.now().date(), key="event_start_date")
-                with c_start_time:
-                    event_start_time = st.time_input("Start time", value=datetime.now().replace(minute=0, second=0, microsecond=0).time(), key="event_start_time")
-                with c_end_date:
-                    event_end_date = st.date_input("End date", value=datetime.now().date(), key="event_end_date")
-                with c_end_time:
-                    event_end_time = st.time_input("End time", value=datetime.now().replace(hour=min(datetime.now().hour + 4, 23), minute=0, second=0, microsecond=0).time(), key="event_end_time")
-
-                if st.button("Create Event"):
-                    if not event_name.strip():
-                        st.error("Enter an event name.")
-                    else:
-                        try:
-                            event = create_event(
-                                event_name.strip(),
-                                selected_station,
-                                event_server,
-                                event_start_date,
-                                event_start_time,
-                                event_end_date,
-                                event_end_time
-                            )
-                            st.success(f"Created event: {event['event_name']}")
-                            time.sleep(1)
-                            st.rerun()
-                        except ValueError as e:
-                            st.error(str(e))
-
-                st.divider()
-                st.markdown("### Station Events")
-
-                if station_events:
-                    event_rows = [
-                        {
-                            "event_name": e.get("event_name"),
-                            "status": e.get("status"),
-                            "start_at": e.get("start_at"),
-                            "end_at": e.get("end_at"),
-                            "assigned_server": e.get("assigned_server")
-                        }
-                        for e in station_events
-                    ]
-                    st.dataframe(pd.DataFrame(event_rows), hide_index=True, use_container_width=True)
-
-                    event_labels = [
-                        f"{e.get('event_name')} | {e.get('start_at')} | {e.get('status')}"
-                        for e in station_events
-                    ]
-                    selected_event_label = st.selectbox("Select event", event_labels, key="selected_event")
-                    selected_event_obj = station_events[event_labels.index(selected_event_label)]
-
-                    c_activate, c_deactivate = st.columns(2)
-                    with c_activate:
-                        if st.button("Activate Selected Event"):
-                            activate_event(selected_event_obj)
-                            st.success("Event activated and station enabled.")
-                            time.sleep(1)
-                            st.rerun()
-                    with c_deactivate:
-                        if st.button("Deactivate Selected Event"):
-                            deactivate_event(selected_event_obj)
-                            st.success("Event completed and station disabled.")
-                            time.sleep(1)
-                            st.rerun()
-                else:
-                    st.info("No events created for this station yet.")
