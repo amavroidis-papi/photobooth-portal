@@ -289,13 +289,17 @@ st.set_page_config(page_title="Photobooth Command", layout="wide", page_icon="�
 st.title("📷 Photobooth Fleet Command")
 
 # 1. SIDEBAR - FLEET VIEW
-st.sidebar.image(LOGO_URL, width=140)
+st.sidebar.image(LOGO_URL, width=100)
 st.sidebar.header("📡 Live Status")
 fleet_data = get_fleet_data()
 if fleet_data:
     df = pd.DataFrame(fleet_data)
+    if 'disk_used_percent' in df.columns:
+        df['disk_used_%'] = df['disk_used_percent'].astype(str) + "%"
+    else:
+        df['disk_used_%'] = "n/a"
     st.sidebar.dataframe(
-        df[['server_id', 'status']], 
+        df[['server_id', 'disk_used_%', 'status']], 
         hide_index=True, use_container_width=True
     )
     
