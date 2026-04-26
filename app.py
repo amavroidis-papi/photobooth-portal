@@ -5,7 +5,7 @@ import pandas as pd
 import io
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # --- CONFIGURATION ---
 # V2 AUTHENTICATION VARS
@@ -322,9 +322,12 @@ def list_events():
         pass
     return sorted(events, key=lambda e: e.get("start_at", ""), reverse=True)
 
-def create_event(event_name, station_id, assigned_server, event_date, event_time, duration_minutes):
-    start_dt = datetime.combine(event_date, event_time)
-    end_dt = start_dt + timedelta(minutes=duration_minutes)
+def create_event(event_name, station_id, assigned_server, start_date, start_time, end_date, end_time):
+    start_dt = datetime.combine(start_date, start_time)
+    end_dt = datetime.combine(end_date, end_time)
+    if end_dt <= start_dt:
+        raise ValueError("End date/time must be after start date/time.")
+
     event_id = build_event_id(event_name, station_id, start_dt)
     event = {
         "event_id": event_id,
@@ -333,7 +336,6 @@ def create_event(event_name, station_id, assigned_server, event_date, event_time
         "assigned_server": assigned_server,
         "status": "scheduled",
         "start_at": start_dt.strftime("%Y-%m-%d %H:%M"),
-        "duration_minutes": duration_minutes,
         "end_at": end_dt.strftime("%Y-%m-%d %H:%M"),
         "timezone": "Europe/Athens",
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -736,22 +738,35 @@ if selected_station:
                     default_server_idx = server_options.index(assigned_default) if assigned_default in server_options else 0
                     event_server = st.selectbox("Assigned server", server_options, index=default_server_idx, key="event_server")
 
-                c_date, c_time, c_duration = st.columns(3)
-                with c_date:
-                    event_date = st.date_input("Date", value=datetime.now().date(), key="event_date")
-                with c_time:
-                    event_time = st.time_input("Start time", value=datetime.now().replace(minute=0, second=0, microsecond=0).time(), key="event_time")
-                with c_duration:
-                    duration_minutes = st.number_input("Duration minutes", min_value=15, max_value=1440, value=240, step=15, key="event_duration")
+                c_start_date, c_start_time, c_end_date, c_end_time = st.columns(4)
+                with c_start_date:
+                    event_start_date = st.date_input("Start date", value=datetime.now().date(), key="event_start_date")
+                with c_start_time:
+                    event_start_time = st.time_input("Start time", value=datetime.now().replace(minute=0, second=0, microsecond=0).time(), key="event_start_time")
+                with c_end_date:
+                    event_end_date = st.date_input("End date", value=datetime.now().date(), key="event_end_date")
+                with c_end_time:
+                    event_end_time = st.time_input("End time", value=datetime.now().replace(hour=min(datetime.now().hour + 4, 23), minute=0, second=0, microsecond=0).time(), key="event_end_time")
 
                 if st.button("Create Event"):
                     if not event_name.strip():
                         st.error("Enter an event name.")
                     else:
-                        event = create_event(event_name.strip(), selected_station, event_server, event_date, event_time, int(duration_minutes))
-                        st.success(f"Created event: {event['event_name']}")
-                        time.sleep(1)
-                        st.rerun()
+                        try:
+                            event = create_event(
+                                event_name.strip(),
+                                selected_station,
+                                event_server,
+                                event_start_date,
+                                event_start_time,
+                                event_end_date,
+                                event_end_time
+                            )
+                            st.success(f"Created event: {event['event_name']}")
+                            time.sleep(1)
+                            st.rerun()
+                        except ValueError as e:
+                            st.error(str(e))
 
                 st.divider()
                 st.markdown("### Station Events")
