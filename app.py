@@ -25,7 +25,12 @@ PHOTOSHOP_SCRIPTS_FOLDER = f"{GLOBAL_ASSETS}/PhotoshopScripts"
 EVENTS_FOLDER = f"{GLOBAL_ASSETS}/Events"
 LOGO_URL = "https://photos.smugmug.com/photos/i-JGmn4QZ/0/Kfbh3K2TsxsddC59CndM9vRx45XBzmXGDx4MfS5CV/O/i-JGmn4QZ.png"
 APP_TIMEZONE = ZoneInfo("Europe/Athens")
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
+RAW_SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+SUPABASE_URL = RAW_SUPABASE_URL
+for suffix in ("/auth/v1", "/rest/v1", "/storage/v1"):
+    if suffix in SUPABASE_URL:
+        SUPABASE_URL = SUPABASE_URL.split(suffix)[0]
+        break
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
 ALLOWED_EMAIL_DOMAIN = os.environ.get("ALLOWED_EMAIL_DOMAIN", "thephotobooth.gr").lower().lstrip("@")
 PORTAL_ADMIN_EMAILS = {
