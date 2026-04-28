@@ -57,6 +57,19 @@ def normalize_email(email):
 def is_allowed_staff_email(email):
     return normalize_email(email).endswith(f"@{ALLOWED_EMAIL_DOMAIN}")
 
+def validate_password_strength(password):
+    if len(password) < 8:
+        return "Password must be at least 8 characters."
+    if not any(char.islower() for char in password):
+        return "Password must include at least one lowercase letter."
+    if not any(char.isupper() for char in password):
+        return "Password must include at least one uppercase letter."
+    if not any(char.isdigit() for char in password):
+        return "Password must include at least one number."
+    if not any(not char.isalnum() for char in password):
+        return "Password must include at least one special character."
+    return None
+
 def get_user_role(email):
     email = normalize_email(email)
     if email in PORTAL_ADMIN_EMAILS:
@@ -202,6 +215,7 @@ def render_auth_gate():
         with st.form("signup_form"):
             email = st.text_input("Work email", key="signup_email").strip()
             password = st.text_input("Create password", type="password", key="signup_password")
+            st.caption("Minimum 8 characters with uppercase, lowercase, number, and special character.")
             password_confirm = st.text_input("Confirm password", type="password", key="signup_password_confirm")
             submitted = st.form_submit_button("Create account")
 
@@ -209,8 +223,8 @@ def render_auth_gate():
             email = normalize_email(email)
             if not is_allowed_staff_email(email):
                 st.error(f"Signup is only available for @{ALLOWED_EMAIL_DOMAIN} emails.")
-            elif len(password) < 8:
-                st.error("Password must be at least 8 characters.")
+            elif validate_password_strength(password):
+                st.error(validate_password_strength(password))
             elif password != password_confirm:
                 st.error("Passwords do not match.")
             else:
