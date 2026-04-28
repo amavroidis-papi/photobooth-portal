@@ -5,6 +5,8 @@ import pandas as pd
 import io
 import os
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -23,6 +25,16 @@ PHOTOSHOP_SCRIPTS_FOLDER = f"{GLOBAL_ASSETS}/PhotoshopScripts"
 EVENTS_FOLDER = f"{GLOBAL_ASSETS}/Events"
 LOGO_URL = "https://photos.smugmug.com/photos/i-JGmn4QZ/0/Kfbh3K2TsxsddC59CndM9vRx45XBzmXGDx4MfS5CV/O/i-JGmn4QZ.png"
 APP_TIMEZONE = ZoneInfo("Europe/Athens")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
+ALLOWED_EMAIL_DOMAIN = os.environ.get("ALLOWED_EMAIL_DOMAIN", "thephotobooth.gr").lower().lstrip("@")
+PORTAL_ADMIN_EMAILS = {
+    email.strip().lower()
+    for email in os.environ.get("PORTAL_ADMIN_EMAILS", "").split(",")
+    if email.strip()
+}
+
+st.set_page_config(page_title="Photobooth Command", layout="wide", page_icon="📷")
 
 # MASTER STATION LIST
 KNOWN_STATIONS = sorted([
@@ -32,6 +44,184 @@ KNOWN_STATIONS = sorted([
     "Mini2BackUp", "Mini2Standard", "Mini3", "Mini3BackUp", 
     "Mini4Standard", "TXStandard"
 ])
+
+# --- PORTAL AUTHENTICATION ---
+def normalize_email(email):
+    return (email or "").strip().lower()
+
+def is_allowed_staff_email(email):
+    return normalize_email(email).endswith(f"@{ALLOWED_EMAIL_DOMAIN}")
+
+def get_user_role(email):
+    email = normalize_email(email)
+    if email in PORTAL_ADMIN_EMAILS:
+        return "admin"
+    return "staff"
+
+def supabase_auth_request(endpoint, payload=None, access_token=None):
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        return None, "Missing SUPABASE_URL or SUPABASE_ANON_KEY."
+
+    url = f"{SUPABASE_URL}/auth/v1/{endpoint.lstrip('/')}"
+    body = json.dumps(payload or {}).encode("utf-8")
+    headers = {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": f"Bearer {access_token or SUPABASE_ANON_KEY}",
+        "Content-Type": "application/json",
+    }
+    request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            content = response.read().decode("utf-8")
+            return json.loads(content) if content else {}, None
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8")
+        try:
+            data = json.loads(raw)
+            message = data.get("msg") or data.get("message") or data.get("error_description") or raw
+        except Exception:
+            message = raw or str(e)
+        return None, message
+    except Exception as e:
+        return None, str(e)
+
+def supabase_get_user(access_token):
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        return None, "Missing SUPABASE_URL or SUPABASE_ANON_KEY."
+
+    url = f"{SUPABASE_URL}/auth/v1/user"
+    headers = {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": f"Bearer {access_token}",
+    }
+    request = urllib.request.Request(url, headers=headers, method="GET")
+
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return json.loads(response.read().decode("utf-8")), None
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8")
+        try:
+            data = json.loads(raw)
+            message = data.get("msg") or data.get("message") or data.get("error_description") or raw
+        except Exception:
+            message = raw or str(e)
+        return None, message
+    except Exception as e:
+        return None, str(e)
+
+def is_email_confirmed(user):
+    return bool(user.get("email_confirmed_at") or user.get("confirmed_at"))
+
+def set_auth_session(session_data):
+    access_token = session_data.get("access_token")
+    user = session_data.get("user")
+    if access_token and not user:
+        user, _ = supabase_get_user(access_token)
+    if not access_token or not user:
+        return "Login succeeded but no valid user session was returned."
+
+    email = normalize_email(user.get("email"))
+    if not is_allowed_staff_email(email):
+        return f"Only @{ALLOWED_EMAIL_DOMAIN} accounts can access this portal."
+    if not is_email_confirmed(user):
+        return "Please confirm your email before logging in. Check your inbox."
+
+    st.session_state.auth_access_token = access_token
+    st.session_state.auth_user = user
+    st.session_state.auth_email = email
+    st.session_state.auth_role = get_user_role(email)
+    return None
+
+def logout_user():
+    token = st.session_state.get("auth_access_token")
+    if token:
+        supabase_auth_request("logout", {}, access_token=token)
+    for key in ["auth_access_token", "auth_user", "auth_email", "auth_role"]:
+        st.session_state.pop(key, None)
+
+def render_auth_gate():
+    token = st.session_state.get("auth_access_token")
+    if token and st.session_state.get("auth_user"):
+        return True
+    if token:
+        user, error = supabase_get_user(token)
+        if user:
+            email = normalize_email(user.get("email"))
+            if is_allowed_staff_email(email) and is_email_confirmed(user):
+                st.session_state.auth_user = user
+                st.session_state.auth_email = email
+                st.session_state.auth_role = get_user_role(email)
+                return True
+        logout_user()
+
+    st.title("📷 Photobooth Fleet Command")
+    st.image(LOGO_URL, width=120)
+    st.subheader("Portal Login")
+    st.caption(f"Access is limited to verified @{ALLOWED_EMAIL_DOMAIN} staff accounts.")
+
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        st.error("Supabase is not configured. Add SUPABASE_URL and SUPABASE_ANON_KEY in Heroku Config Vars.")
+        return False
+
+    login_tab, signup_tab = st.tabs(["Login", "Sign up"])
+
+    with login_tab:
+        with st.form("login_form"):
+            email = st.text_input("Email", key="login_email").strip()
+            password = st.text_input("Password", type="password", key="login_password")
+            submitted = st.form_submit_button("Login")
+
+        if submitted:
+            email = normalize_email(email)
+            if not is_allowed_staff_email(email):
+                st.error(f"Use your @{ALLOWED_EMAIL_DOMAIN} email address.")
+            elif not password:
+                st.error("Enter your password.")
+            else:
+                data, error = supabase_auth_request(
+                    "token?grant_type=password",
+                    {"email": email, "password": password}
+                )
+                if error:
+                    st.error(error)
+                else:
+                    session_error = set_auth_session(data)
+                    if session_error:
+                        st.error(session_error)
+                    else:
+                        st.rerun()
+
+    with signup_tab:
+        with st.form("signup_form"):
+            email = st.text_input("Work email", key="signup_email").strip()
+            password = st.text_input("Create password", type="password", key="signup_password")
+            password_confirm = st.text_input("Confirm password", type="password", key="signup_password_confirm")
+            submitted = st.form_submit_button("Create account")
+
+        if submitted:
+            email = normalize_email(email)
+            if not is_allowed_staff_email(email):
+                st.error(f"Signup is only available for @{ALLOWED_EMAIL_DOMAIN} emails.")
+            elif len(password) < 8:
+                st.error("Password must be at least 8 characters.")
+            elif password != password_confirm:
+                st.error("Passwords do not match.")
+            else:
+                data, error = supabase_auth_request(
+                    "signup",
+                    {"email": email, "password": password, "data": {"role": "staff"}}
+                )
+                if error:
+                    st.error(error)
+                else:
+                    st.success("Account created. Check your email and confirm your account before logging in.")
+
+    return False
+
+if not render_auth_gate():
+    st.stop()
 
 # --- CONNECT TO DROPBOX (V2 AUTH LOGIC) ---
 try:
@@ -435,11 +625,16 @@ def sync_events_now():
     return changes
 
 # --- UI LAYOUT ---
-st.set_page_config(page_title="Photobooth Command", layout="wide", page_icon="📷")
 st.title("📷 Photobooth Fleet Command")
 
 # 1. SIDEBAR - FLEET VIEW
 st.sidebar.image(LOGO_URL, width=100)
+if st.session_state.get("auth_email"):
+    st.sidebar.caption(f"Signed in: {st.session_state.auth_email}")
+    st.sidebar.caption(f"Role: {st.session_state.get('auth_role', 'staff')}")
+    if st.sidebar.button("Logout"):
+        logout_user()
+        st.rerun()
 st.sidebar.header("📡 Live Status")
 fleet_data = get_fleet_data()
 if fleet_data:
