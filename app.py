@@ -43,6 +43,16 @@ PORTAL_ADMIN_EMAILS = {
     for email in os.environ.get("PORTAL_ADMIN_EMAILS", "").split(",")
     if email.strip()
 }
+PORTAL_FLEET_EMAILS = {
+    email.strip().lower()
+    for email in os.environ.get("PORTAL_FLEET_EMAILS", "").split(",")
+    if email.strip()
+}
+PORTAL_OPERATIONS_EMAILS = {
+    email.strip().lower()
+    for email in os.environ.get("PORTAL_OPERATIONS_EMAILS", "").split(",")
+    if email.strip()
+}
 
 st.set_page_config(page_title="Photobooth Command", layout="wide", page_icon="📷")
 
@@ -80,6 +90,26 @@ def get_user_role(email):
     if email in PORTAL_ADMIN_EMAILS:
         return "admin"
     return "staff"
+
+def has_fleet_access(email):
+    email = normalize_email(email)
+    return email in PORTAL_ADMIN_EMAILS or email in PORTAL_FLEET_EMAILS
+
+def has_operations_access(email):
+    email = normalize_email(email)
+    if email in PORTAL_ADMIN_EMAILS:
+        return True
+    if PORTAL_OPERATIONS_EMAILS:
+        return email in PORTAL_OPERATIONS_EMAILS
+    return True
+
+def get_allowed_portals(email):
+    portals = []
+    if has_fleet_access(email):
+        portals.append("Fleet Management")
+    if has_operations_access(email):
+        portals.append("Operations")
+    return portals
 
 def supabase_auth_request(endpoint, payload=None, access_token=None):
     if not SUPABASE_URL or not SUPABASE_ANON_KEY:
@@ -161,8 +191,56 @@ def logout_user():
     token = st.session_state.get("auth_access_token")
     if token:
         supabase_auth_request("logout", {}, access_token=token)
-    for key in ["auth_access_token", "auth_user", "auth_email", "auth_role"]:
+    for key in ["auth_access_token", "auth_user", "auth_email", "auth_role", "selected_portal"]:
         st.session_state.pop(key, None)
+
+def render_account_sidebar():
+    st.sidebar.image(LOGO_URL, width=100)
+    if st.session_state.get("auth_email"):
+        st.sidebar.caption(f"Signed in: {st.session_state.auth_email}")
+        st.sidebar.caption(f"Role: {st.session_state.get('auth_role', 'staff')}")
+    if st.sidebar.button("Switch Portal"):
+        st.session_state.pop("selected_portal", None)
+        st.session_state.pop("portal_view", None)
+        st.rerun()
+    if st.sidebar.button("Logout"):
+        logout_user()
+        st.rerun()
+
+def render_portal_selector():
+    email = st.session_state.get("auth_email")
+    allowed_portals = get_allowed_portals(email)
+    selected_portal = st.session_state.get("selected_portal")
+
+    if selected_portal in allowed_portals:
+        return selected_portal
+    st.session_state.pop("selected_portal", None)
+
+    st.title("📷 Photobooth Command")
+    st.image(LOGO_URL, width=120)
+    st.subheader("Choose Portal")
+    st.caption(f"Signed in as {email}")
+
+    if not allowed_portals:
+        st.error("Your account does not have access to any portal yet. Ask an admin to add your email to a portal access list.")
+        if st.button("Logout"):
+            logout_user()
+            st.rerun()
+        st.stop()
+
+    cols = st.columns(len(allowed_portals))
+    for col, portal in zip(cols, allowed_portals):
+        with col:
+            st.markdown(f"### {portal}")
+            if portal == "Fleet Management":
+                st.caption("Station configuration, fleet health, and technical event automation.")
+            else:
+                st.caption("Operations planning, staff jobs, logistics tasks, and weekly scheduling.")
+            if st.button(f"Open {portal}", key=f"open_{portal}"):
+                st.session_state.selected_portal = portal
+                st.rerun()
+
+    st.stop()
 
 def render_auth_gate():
     token = st.session_state.get("auth_access_token")
@@ -245,6 +323,20 @@ def render_auth_gate():
     return False
 
 if not render_auth_gate():
+    st.stop()
+
+selected_portal = render_portal_selector()
+
+if selected_portal == "Operations":
+    render_account_sidebar()
+    if render_operations_app:
+        render_operations_app(
+            current_user=st.session_state.get("auth_email"),
+            current_role=st.session_state.get("auth_role"),
+            access_token=st.session_state.get("auth_access_token"),
+        )
+    else:
+        st.error("Operations module is not deployed yet. Upload operations_app.py, operations_db.py, and operations_models.py alongside app.py.")
     st.stop()
 
 # --- CONNECT TO DROPBOX (V2 AUTH LOGIC) ---
@@ -656,6 +748,10 @@ st.sidebar.image(LOGO_URL, width=100)
 if st.session_state.get("auth_email"):
     st.sidebar.caption(f"Signed in: {st.session_state.auth_email}")
     st.sidebar.caption(f"Role: {st.session_state.get('auth_role', 'staff')}")
+    if st.sidebar.button("Switch Portal"):
+        st.session_state.pop("selected_portal", None)
+        st.session_state.pop("portal_view", None)
+        st.rerun()
     if st.sidebar.button("Logout"):
         logout_user()
         st.rerun()
@@ -689,7 +785,7 @@ if "pending_portal_view" in st.session_state:
     st.session_state.portal_view = st.session_state.pop("pending_portal_view")
 if "pending_sidebar_station" in st.session_state:
     st.session_state.sidebar_station = st.session_state.pop("pending_sidebar_station")
-portal_view = st.sidebar.radio("Select View", ["Station Manager", "Events", "Operations"], key="portal_view", label_visibility="collapsed")
+portal_view = st.sidebar.radio("Select View", ["Station Manager", "Events"], key="portal_view", label_visibility="collapsed")
 
 st.sidebar.divider()
 
@@ -714,17 +810,6 @@ if portal_view == "Station Manager":
     if "sidebar_station" in st.session_state and st.session_state.sidebar_station not in display_list:
         display_list = sorted(display_list + [st.session_state.sidebar_station])
     selected_station = st.sidebar.selectbox("Select Station to Configure", display_list, key="sidebar_station")
-
-if portal_view == "Operations":
-    if render_operations_app:
-        render_operations_app(
-            current_user=st.session_state.get("auth_email"),
-            current_role=st.session_state.get("auth_role"),
-            access_token=st.session_state.get("auth_access_token"),
-        )
-    else:
-        st.error("Operations module is not deployed yet. Upload operations_app.py, operations_db.py, and operations_models.py alongside app.py.")
-    st.stop()
 
 # --- PAGE 1: FLEET DASHBOARD (IF NO STATION SELECTED OR DASHBOARD MODE) ---
 # NOTE: Your requested code keeps it simple, but let's fix the Dashboard Crash here
