@@ -10,7 +10,10 @@ import urllib.request
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from operations_app import render_operations_app
+try:
+    from operations_app import render_operations_app
+except ModuleNotFoundError:
+    render_operations_app = None
 
 # --- CONFIGURATION ---
 # V2 AUTHENTICATION VARS
@@ -713,11 +716,14 @@ if portal_view == "Station Manager":
     selected_station = st.sidebar.selectbox("Select Station to Configure", display_list, key="sidebar_station")
 
 if portal_view == "Operations":
-    render_operations_app(
-        current_user=st.session_state.get("auth_email"),
-        current_role=st.session_state.get("auth_role"),
-        access_token=st.session_state.get("auth_access_token"),
-    )
+    if render_operations_app:
+        render_operations_app(
+            current_user=st.session_state.get("auth_email"),
+            current_role=st.session_state.get("auth_role"),
+            access_token=st.session_state.get("auth_access_token"),
+        )
+    else:
+        st.error("Operations module is not deployed yet. Upload operations_app.py, operations_db.py, and operations_models.py alongside app.py.")
     st.stop()
 
 # --- PAGE 1: FLEET DASHBOARD (IF NO STATION SELECTED OR DASHBOARD MODE) ---
