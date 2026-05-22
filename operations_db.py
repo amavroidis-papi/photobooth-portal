@@ -88,6 +88,24 @@ def _request(method, table_name, query=None, payload=None, access_token=None, pr
         raise OperationsDatabaseError(str(e)) from e
 
 
+def _clean_payload(payload):
+    return {
+        key: value
+        for key, value in payload.items()
+        if value is not None and value != ""
+    }
+
+
+def _insert(table_name, payload, access_token=None):
+    return _request(
+        "POST",
+        table_name,
+        payload=_clean_payload(payload),
+        access_token=access_token,
+        prefer="return=representation",
+    )
+
+
 def check_connection(access_token=None):
     query = "select=id&limit=1"
     return _request("GET", "events", query=query, access_token=access_token)
@@ -115,6 +133,22 @@ def list_staff(access_token=None):
         "order": "full_name.asc",
     })
     return _request("GET", "staff", query=query, access_token=access_token) or []
+
+
+def list_vehicles(access_token=None):
+    query = urllib.parse.urlencode({
+        "select": "id,vehicle_name,plate_number,status,notes",
+        "order": "vehicle_name.asc",
+    })
+    return _request("GET", "vehicles", query=query, access_token=access_token) or []
+
+
+def list_equipment(access_token=None):
+    query = urllib.parse.urlencode({
+        "select": "id,equipment_name,category,status,storage_location,notes",
+        "order": "category.asc,equipment_name.asc",
+    })
+    return _request("GET", "equipment", query=query, access_token=access_token) or []
 
 
 def list_operations_events(start_date=None, end_date=None, access_token=None):
@@ -162,3 +196,83 @@ def list_staff_jobs(user_email, access_token=None):
         "order": "start_at.asc",
     })
     return _request("GET", "event_staff_assignments", query=query, access_token=access_token) or []
+
+
+def create_client(client_name, main_contact_name=None, main_contact_phone=None, main_contact_email=None, notes=None, access_token=None):
+    return _insert(
+        "clients",
+        {
+            "client_name": client_name,
+            "main_contact_name": main_contact_name,
+            "main_contact_phone": main_contact_phone,
+            "main_contact_email": main_contact_email,
+            "notes": notes,
+        },
+        access_token=access_token,
+    )
+
+
+def create_venue(venue_name, address=None, google_maps_url=None, loading_instructions=None, parking_instructions=None, notes=None, access_token=None):
+    return _insert(
+        "venues",
+        {
+            "venue_name": venue_name,
+            "address": address,
+            "google_maps_url": google_maps_url,
+            "loading_instructions": loading_instructions,
+            "parking_instructions": parking_instructions,
+            "notes": notes,
+        },
+        access_token=access_token,
+    )
+
+
+def create_staff(full_name, email=None, phone=None, role_type=None, has_driving_license=False, has_vehicle=False, access_token=None):
+    return _insert(
+        "staff",
+        {
+            "full_name": full_name,
+            "email": email,
+            "phone": phone,
+            "role_type": role_type,
+            "has_driving_license": has_driving_license,
+            "has_vehicle": has_vehicle,
+        },
+        access_token=access_token,
+    )
+
+
+def create_vehicle(vehicle_name, plate_number=None, capacity_notes=None, notes=None, access_token=None):
+    return _insert(
+        "vehicles",
+        {
+            "vehicle_name": vehicle_name,
+            "plate_number": plate_number,
+            "capacity_notes": capacity_notes,
+            "notes": notes,
+        },
+        access_token=access_token,
+    )
+
+
+def create_equipment(equipment_name, category=None, serial_number=None, asset_code=None, storage_location=None, notes=None, access_token=None):
+    return _insert(
+        "equipment",
+        {
+            "equipment_name": equipment_name,
+            "category": category,
+            "serial_number": serial_number,
+            "asset_code": asset_code,
+            "storage_location": storage_location,
+            "notes": notes,
+        },
+        access_token=access_token,
+    )
+
+
+def create_event(payload, access_token=None):
+    return _insert("events", payload, access_token=access_token)
+
+
+def create_logistics_task(payload, access_token=None):
+    return _insert("logistics_tasks", payload, access_token=access_token)

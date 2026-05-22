@@ -1,5 +1,6 @@
 EVENT_STATUSES = [
     "Draft",
+    "Planned",
     "Confirmed",
     "Ready for Operations",
     "In Progress",
