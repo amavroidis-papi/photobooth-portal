@@ -10,6 +10,8 @@ import urllib.request
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from operations_app import render_operations_app
+
 # --- CONFIGURATION ---
 # V2 AUTHENTICATION VARS
 DROPBOX_APP_KEY = os.environ.get("DROPBOX_APP_KEY")
@@ -684,7 +686,7 @@ if "pending_portal_view" in st.session_state:
     st.session_state.portal_view = st.session_state.pop("pending_portal_view")
 if "pending_sidebar_station" in st.session_state:
     st.session_state.sidebar_station = st.session_state.pop("pending_sidebar_station")
-portal_view = st.sidebar.radio("Select View", ["Station Manager", "Events"], key="portal_view", label_visibility="collapsed")
+portal_view = st.sidebar.radio("Select View", ["Station Manager", "Events", "Operations"], key="portal_view", label_visibility="collapsed")
 
 st.sidebar.divider()
 
@@ -709,6 +711,14 @@ if portal_view == "Station Manager":
     if "sidebar_station" in st.session_state and st.session_state.sidebar_station not in display_list:
         display_list = sorted(display_list + [st.session_state.sidebar_station])
     selected_station = st.sidebar.selectbox("Select Station to Configure", display_list, key="sidebar_station")
+
+if portal_view == "Operations":
+    render_operations_app(
+        current_user=st.session_state.get("auth_email"),
+        current_role=st.session_state.get("auth_role"),
+        access_token=st.session_state.get("auth_access_token"),
+    )
+    st.stop()
 
 # --- PAGE 1: FLEET DASHBOARD (IF NO STATION SELECTED OR DASHBOARD MODE) ---
 # NOTE: Your requested code keeps it simple, but let's fix the Dashboard Crash here
