@@ -544,6 +544,21 @@ def save_action_metadata(folder_path, action_set, action_text, append_only=True)
     )
     return actions
 
+def clear_action_metadata(folder_path, action_set):
+    metadata = {
+        "action_set": action_set,
+        "actions": [],
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
+    ensure_dropbox_folder(folder_path)
+    path = f"{folder_path}/{action_set}.json"
+    dbx.files_upload(
+        json.dumps(metadata, indent=2).encode("utf-8"),
+        path,
+        mode=dropbox.files.WriteMode.overwrite
+    )
+    return path
+
 def action_name_input(label, current_value, available_actions, key):
     if available_actions:
         options = available_actions
@@ -1166,7 +1181,7 @@ elif selected_station:
                     placeholder=f"{selected_station}_Portrait\n{selected_station}_Landscape\n{selected_station}001\n{selected_station}002"
                 )
 
-                col_upload, col_metadata = st.columns(2)
+                col_upload, col_metadata, col_clear = st.columns(3)
                 with col_upload:
                     if up_station_atn and st.button("Upload Station Action Set"):
                         upload_action_file(up_station_atn, station_actions_folder, target_filename=station_action_filename)
@@ -1178,6 +1193,13 @@ elif selected_station:
                     if st.button("Save Station Metadata"):
                         save_action_metadata(station_actions_folder, station_action_set, station_action_text)
                         st.success(f"Saved metadata for {station_action_set}")
+                        time.sleep(1)
+                        st.rerun()
+                with col_clear:
+                    clear_confirm = st.checkbox("Confirm clear", key="clear_station_metadata_confirm")
+                    if st.button("Clear Metadata", disabled=not clear_confirm):
+                        clear_action_metadata(station_actions_folder, station_action_set)
+                        st.success(f"Cleared metadata for {station_action_set}. The .atn file was not deleted.")
                         time.sleep(1)
                         st.rerun()
 
