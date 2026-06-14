@@ -1153,32 +1153,28 @@ elif selected_station:
 
                 # 2. Subfolder Actions
                 st.markdown("### Event Subfolder Actions (001...099)")
-                st.caption(f"Subfolder photos use the same set: {station_action_set}")
-                st.caption(f"Expected action names: {selected_station}001, {selected_station}002, ...")
-                subfolder_actions = [
-                    action for action in station_actions
-                    if action.startswith(selected_station) and action[len(selected_station):].isdigit()
-                ]
-                if subfolder_actions:
-                    st.caption("Detected subfolder actions: " + ", ".join(subfolder_actions[:12]) + ("..." if len(subfolder_actions) > 12 else ""))
-                else:
-                    st.caption("No subfolder actions detected in metadata yet.")
+                st.caption(f"Subfolder photos use the same Photoshop set: {station_action_set}")
+                st.info(
+                    f"Automatic rule: /{selected_station}/incoming/001 runs action {selected_station}001, "
+                    f"/{selected_station}/incoming/002 runs {selected_station}002, up to 099. "
+                    "These subfolder action names do not need to be added to portal metadata."
+                )
 
                 st.divider()
 
                 # 3. Uploader and Metadata
                 st.subheader(f"Upload {station_action_filename}")
-                st.caption("Upload one .atn file per station. It will be saved using the station name, regardless of the uploaded filename.")
+                st.caption("Upload one .atn file per station. Metadata is only for portal dropdowns; subfolder actions follow the automatic naming rule.")
                 up_station_atn = st.file_uploader("Upload station .atn", type=['atn'], key="station_atn")
                 existing_station_actions = load_action_metadata(station_actions_folder, station_action_set)
                 if existing_station_actions:
                     st.caption("Existing metadata actions: " + ", ".join(existing_station_actions[:12]) + ("..." if len(existing_station_actions) > 12 else ""))
 
                 station_action_text = st.text_area(
-                    f"Add action names to {station_action_set}",
+                    f"Add root/dropdown action names to {station_action_set}",
                     value="",
                     key="station_action_text",
-                    placeholder=f"{selected_station}_Portrait\n{selected_station}_Landscape\n{selected_station}001\n{selected_station}002"
+                    placeholder=f"{selected_station}_Portrait\n{selected_station}_Landscape\n{selected_station}_Strip_AI"
                 )
 
                 col_upload, col_metadata, col_clear = st.columns(3)
